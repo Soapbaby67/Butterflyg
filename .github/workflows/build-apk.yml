@@ -36,7 +36,7 @@ jobs:
             if [[ "$trimmed" == \{* ]]; then
               printf '%s\n' "$GOOGLE_SERVICES_JSON" > app/google-services.json
             else
-              printf '%s' "$GOOGLE_SERVICES_JSON" | base64 -d > app/google-services.json
+              printf '%s' "$trimmed" | base64 -d > app/google-services.json
             fi
             echo "Restored app/google-services.json from GitHub Secret."
           else
@@ -84,7 +84,7 @@ jobs:
             base64 -d debug.keystore.base64 > debug.keystore
           elif [ -n "$DEBUG_KEYSTORE_BASE64" ]; then
             echo "Restored debug.keystore from GitHub Secret DEBUG_KEYSTORE_BASE64"
-            printf '%s' "$DEBUG_KEYSTORE_BASE64" | base64 -d > debug.keystore
+            printf '%s' "$DEBUG_KEYSTORE_BASE64" | tr -d '[:space:]' | base64 -d > debug.keystore
           else
             echo "::warning::debug.keystore.base64 not found; generating a temporary debug keystore (Google Sign-In will fail unless this SHA-1 is registered in Firebase)."
             keytool -genkeypair -v -keystore debug.keystore \
