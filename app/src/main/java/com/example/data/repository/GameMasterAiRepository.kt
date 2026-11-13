@@ -10,10 +10,13 @@ import com.example.data.model.NpcRelation
 import com.example.data.model.SessionSetupInput
 import com.example.data.model.TurnChoice
 import com.google.firebase.Firebase
+import com.google.firebase.ai.GenerativeModel
 import com.google.firebase.ai.ai
 import com.google.firebase.ai.type.Schema
+import com.google.firebase.ai.type.ThinkingLevel
 import com.google.firebase.ai.type.content
 import com.google.firebase.ai.type.generationConfig
+import com.google.firebase.ai.type.thinkingConfig
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.TimeoutCancellationException
 import kotlinx.coroutines.withTimeout
@@ -110,13 +113,30 @@ class GameMasterAiRepository(
         )
     }
 
-    private val model by lazy {
+    private val primaryModel by lazy {
         Firebase.ai.generativeModel(
             modelName = "gemini-3.8-flash",
             generationConfig = generationConfig {
                 responseMimeType = "application/json"
                 responseSchema = turnResponseSchema
                 temperature = 0.85f
+                maxOutputTokens = 4096
+                thinkingConfig = thinkingConfig {
+                    thinkingLevel = ThinkingLevel.LOW
+                }
+            },
+            systemInstruction = systemPrompt
+        )
+    }
+
+    private val fastFallbackModel by lazy {
+        Firebase.ai.generativeModel(
+            modelName = "gemini-3.5-flash-lite",
+            generationConfig = generationConfig {
+                responseMimeType = "application/json"
+                responseSchema = turnResponseSchema
+                temperature = 0.85f
+                maxOutputTokens = 4096
             },
             systemInstruction = systemPrompt
         )
@@ -200,17 +220,19 @@ class GameMasterAiRepository(
 
     private suspend fun invokeModel(prompt: String, defaultTurnNumber: Long): GmTurnOutcome {
         try {
-            val response = withTimeout(TIMEOUT_MS) {
-                model.generateContent(prompt)
+            val jsonString = try {
+                streamModelJson(primaryModel, prompt, PRIMARY_TIMEOUT_MS)
+            } catch (timeout: TimeoutCancellationException) {
+                Log.w(TAG, "Primary model gemini-3.8-flash timed out; falling back to gemini-3.5-flash-lite", timeout)
+                streamModelJson(fastFallbackModel, prompt, FALLBACK_TIMEOUT_MS)
             }
-            val jsonString = response.text
-            if (jsonString.isNullOrBlank()) {
+            if (jsonString.isBlank()) {
                 throw IllegalStateException("ИИ-мастер вернул пустой ответ. Попробуйте повторить ход.")
             }
             return parseTurnOutcome(jsonString, defaultTurnNumber)
         } catch (e: TimeoutCancellationException) {
             Log.e(TAG, "Firebase AI generation timed out", e)
-            throw IllegalStateException("ИИ-мастер слишком долго обдумывал сцену (таймаут 60 сек). Попробуйте ещё раз.", e)
+            throw IllegalStateException("ИИ-мастер слишком долго обдумывал сцену. Проверьте интернет и попробуйте ещё раз.", e)
         } catch (e: CancellationException) {
             throw e
         } catch (e: Exception) {
@@ -232,6 +254,18 @@ class GameMasterAiRepository(
             }
             throw IllegalStateException(finalMessage, e)
         }
+    }
+
+    private suspend fun streamModelJson(
+        targetModel: GenerativeModel,
+        prompt: String,
+        timeoutMs: Long
+    ): String = withTimeout(timeoutMs) {
+        val builder = StringBuilder()
+        targetModel.generateContentStream(prompt).collect { chunk ->
+            chunk.text?.let { builder.append(it) }
+        }
+        builder.toString().trim()
     }
 
     private fun parseTurnOutcome(jsonString: String, turnNumber: Long): GmTurnOutcome {
@@ -339,6 +373,7 @@ class GameMasterAiRepository(
 
     private companion object {
         const val TAG = "GameMasterAiRepo"
-        const val TIMEOUT_MS = 60_000L
+        const val PRIMARY_TIMEOUT_MS = 35_000L
+        const val FALLBACK_TIMEOUT_MS = 35_000L
     }
 }
