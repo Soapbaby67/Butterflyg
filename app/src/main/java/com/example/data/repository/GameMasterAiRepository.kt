@@ -25,6 +25,8 @@ import org.json.JSONObject
 class GameMasterAiRepository(
     private val debugTokenProvider: () -> String? = { null }
 ) {
+    @Volatile
+    private var primaryCooldownUntilMs: Long = 0L
 
     private val emotionCategories = listOf(
         "joy",
@@ -38,14 +40,44 @@ class GameMasterAiRepository(
         "neutral"
     )
 
+    private val weatherMoods = listOf(
+        "rain",
+        "storm",
+        "fog",
+        "night",
+        "dawn",
+        "day",
+        "snow",
+        "indoor_candle",
+        "neon_night"
+    )
+
+    private val npcArchetypes = listOf(
+        "warrior",
+        "rogue",
+        "mage",
+        "noble",
+        "cyber",
+        "merchant",
+        "commoner",
+        "creature"
+    )
+
     private val turnResponseSchema = Schema.obj(
         properties = mapOf(
             "narrative" to Schema.string(
                 description = "2-4 ярких абзаца повествования на русском языке, строго без описания мыслей, слов или действий игрока (Anti-Godmodding)."
             ),
             "hudLocation" to Schema.string(description = "Текущая локация для HUD"),
-            "hudTime" to Schema.string(description = "Текущее внутриигровое время для HUD"),
-            "hudStatusAndInventory" to Schema.string(description = "Краткое состояние персонажа и ключевой предмет для HUD"),
+            "hudTime" to Schema.string(description = "Текущее внутриигровое время и погода для HUD"),
+            "sceneWeather" to Schema.enumeration(
+                values = weatherMoods,
+                description = "Визуальное настроение/погода сцены для фона"
+            ),
+            "healthPercent" to Schema.integer(description = "Здоровье героя в процентах от 0 до 100"),
+            "healthStatus" to Schema.string(description = "Краткое состояние героя (2-3 слова), например: В норме, Ранен, Утомлён"),
+            "currencyLabel" to Schema.string(description = "Текущие деньги или ресурс (например: 15 крон, 300 эдди) или пустая строка"),
+            "hudStatusAndInventory" to Schema.string(description = "Краткое состояние персонажа для HUD"),
             "hudRelationsAndCanon" to Schema.string(description = "Краткий статус отношений и влияния на канон для HUD"),
             "canonDeviationPercent" to Schema.integer(description = "Оценка отклонения от канона от 0 до 100"),
             "activeNpc" to Schema.obj(
@@ -61,6 +93,10 @@ class GameMasterAiRepository(
                     "note" to Schema.string(description = "Краткая ремарка о мимике, тоне голоса или поведении NPC")
                 )
             ),
+            "activeNpcArchetype" to Schema.enumeration(
+                values = npcArchetypes,
+                description = "Визуальный архетип активного NPC для подбора портрета"
+            ),
             "inventory" to Schema.array(
                 items = Schema.string(),
                 description = "Актуальный список предметов в инвентаре игрока"
@@ -73,7 +109,8 @@ class GameMasterAiRepository(
                         "trustLevel" to Schema.integer(description = "От -100 до 100"),
                         "statusLabel" to Schema.string(),
                         "lastEmotion" to Schema.string(),
-                        "lastEmotionCategory" to Schema.enumeration(values = emotionCategories)
+                        "lastEmotionCategory" to Schema.enumeration(values = emotionCategories),
+                        "archetype" to Schema.enumeration(values = npcArchetypes)
                     )
                 ),
                 description = "Актуальный список ключевых встреченных NPC и их отношений с игроком"
@@ -93,7 +130,8 @@ class GameMasterAiRepository(
                 ),
                 description = "3 или 4 принципиально разных варианта действий игрока"
             )
-        )
+        ),
+        optionalProperties = listOf("currencyLabel", "activeNpcArchetype", "sceneWeather")
     )
 
     private val systemPrompt = content {
@@ -162,7 +200,7 @@ class GameMasterAiRepository(
         recentTurns: List<CampaignTurn>,
         playerAction: String
     ): GmTurnOutcome {
-        val historyBlock = recentTurns.takeLast(8).joinToString("\n\n") { turn ->
+        val historyBlock = recentTurns.takeLast(4).joinToString("\n\n") { turn ->
             buildString {
                 appendLine("--- Ход ${turn.turnNumber} ---")
                 if (turn.playerAction.isNotBlank()) {
@@ -220,12 +258,31 @@ class GameMasterAiRepository(
 
     private suspend fun invokeModel(prompt: String, defaultTurnNumber: Long): GmTurnOutcome {
         try {
-            val jsonString = try {
-                streamModelJson(primaryModel, prompt, PRIMARY_TIMEOUT_MS)
-            } catch (timeout: TimeoutCancellationException) {
-                Log.w(TAG, "Primary model gemini-3.8-flash timed out; falling back to gemini-3.5-flash-lite", timeout)
+            val now = System.currentTimeMillis()
+            val useFastOnly = now < primaryCooldownUntilMs
+
+            val jsonString = if (useFastOnly) {
                 streamModelJson(fastFallbackModel, prompt, FALLBACK_TIMEOUT_MS)
+            } else {
+                try {
+                    streamModelJson(primaryModel, prompt, PRIMARY_TIMEOUT_MS)
+                } catch (timeout: TimeoutCancellationException) {
+                    Log.w(TAG, "Primary model gemini-3.8-flash timed out; switching to gemini-3.5-flash-lite", timeout)
+                    primaryCooldownUntilMs = System.currentTimeMillis() + COOLDOWN_MS
+                    streamModelJson(fastFallbackModel, prompt, FALLBACK_TIMEOUT_MS)
+                } catch (e: CancellationException) {
+                    throw e
+                } catch (e: Exception) {
+                    if (isQuotaOrRateLimitError(e)) {
+                        Log.w(TAG, "Primary model hit quota/rate-limit; switching to gemini-3.5-flash-lite", e)
+                        primaryCooldownUntilMs = System.currentTimeMillis() + COOLDOWN_MS
+                        streamModelJson(fastFallbackModel, prompt, FALLBACK_TIMEOUT_MS)
+                    } else {
+                        throw e
+                    }
+                }
             }
+
             if (jsonString.isBlank()) {
                 throw IllegalStateException("ИИ-мастер вернул пустой ответ. Попробуйте повторить ход.")
             }
@@ -247,12 +304,35 @@ class GameMasterAiRepository(
             } else {
                 null
             }
-            val finalMessage = if (!debugToken.isNullOrBlank()) {
-                "$rawMessage\n\nDebug-токен этого телефона:\n$debugToken\n\nДобавьте его в Firebase Console → App Check → Apps → Manage debug tokens."
-            } else {
-                rawMessage
+            val finalMessage = when {
+                !debugToken.isNullOrBlank() ->
+                    "$rawMessage\n\nDebug-токен этого телефона:\n$debugToken\n\nДобавьте его в Firebase Console → App Check → Apps → Manage debug tokens."
+                isQuotaOrRateLimitError(e) ->
+                    formatQuotaErrorMessage(rawMessage)
+                else -> rawMessage
             }
             throw IllegalStateException(finalMessage, e)
+        }
+    }
+
+    private fun isQuotaOrRateLimitError(error: Throwable): Boolean {
+        val msg = generateSequence(error) { it.cause }
+            .mapNotNull { it.message ?: it.localizedMessage }
+            .joinToString(" ")
+        return msg.contains("quota", ignoreCase = true) ||
+            msg.contains("rate limit", ignoreCase = true) ||
+            msg.contains("rate-limit", ignoreCase = true) ||
+            msg.contains("RESOURCE_EXHAUSTED", ignoreCase = true) ||
+            msg.contains("429")
+    }
+
+    private fun formatQuotaErrorMessage(rawMessage: String): String {
+        val retryMatch = Regex("""retry in (\d+(?:\.\d+)?)s""", RegexOption.IGNORE_CASE).find(rawMessage)
+        val seconds = retryMatch?.groupValues?.getOrNull(1)?.toDoubleOrNull()?.let { kotlin.math.ceil(it).toInt() }
+        return if (seconds != null && seconds > 0) {
+            "Достигнут минутный лимит запросов бесплатного тарифа Gemini. Подождите $seconds сек. и нажмите «Повторить»."
+        } else {
+            "Достигнут минутный лимит запросов бесплатного тарифа Gemini. Подождите ~20 сек. и нажмите «Повторить»."
         }
     }
 
@@ -301,6 +381,7 @@ class GameMasterAiRepository(
             }
         }
 
+        val activeNpcArchetype = root.optString("activeNpcArchetype").trim().lowercase()
         val npcsArray = root.optJSONArray("npcs")
         val npcs = buildList {
             if (npcsArray != null) {
@@ -309,6 +390,10 @@ class GameMasterAiRepository(
                     val name = obj.optString("name").trim()
                     if (name.isBlank()) continue
                     val cat = EmotionCategory.fromKey(obj.optString("lastEmotionCategory", "neutral"))
+                    val parsedArchetype = obj.optString("archetype").trim().lowercase()
+                        .ifBlank {
+                            if (name.equals(activeNpc.name, ignoreCase = true)) activeNpcArchetype else ""
+                        }
                     add(
                         NpcRelation(
                             name = name,
@@ -316,10 +401,27 @@ class GameMasterAiRepository(
                             trustLevel = obj.optLong("trustLevel", 0L).coerceIn(-100L, 100L),
                             statusLabel = obj.optString("statusLabel").trim(),
                             lastEmotion = obj.optString("lastEmotion").trim().ifBlank { cat.russianDefault },
-                            lastEmotionCategory = cat.key
+                            lastEmotionCategory = cat.key,
+                            archetype = parsedArchetype
                         )
                     )
                 }
+            }
+            if (activeNpc.hasActiveNpc &&
+                activeNpc.name.isNotBlank() &&
+                none { it.name.equals(activeNpc.name, ignoreCase = true) }
+            ) {
+                add(
+                    NpcRelation(
+                        name = activeNpc.name,
+                        role = "Собеседник в сцене",
+                        trustLevel = 0L,
+                        statusLabel = "Первая встреча",
+                        lastEmotion = activeNpc.emotionLabel,
+                        lastEmotionCategory = activeNpc.emotionCategory,
+                        archetype = activeNpcArchetype
+                    )
+                )
             }
         }
 
@@ -355,11 +457,52 @@ class GameMasterAiRepository(
             }
         }
 
+        val healthPercent = root.optLong("healthPercent", 100L).coerceIn(0L, 100L)
+        val healthStatus = root.optString("healthStatus").trim()
+        val currencyLabel = root.optString("currencyLabel").trim()
+        val rawStatus = root.optString("hudStatusAndInventory").trim()
+        val formattedStatus = buildString {
+            if (healthStatus.isNotBlank()) {
+                append("Здоровье: ")
+                append(healthStatus)
+                append(" (")
+                append(healthPercent)
+                append("%)")
+            } else if (rawStatus.isNotBlank()) {
+                append(rawStatus)
+            } else {
+                append("Здоровье: В норме (")
+                append(healthPercent)
+                append("%)")
+            }
+            if (currencyLabel.isNotBlank() && !toString().contains(currencyLabel, ignoreCase = true)) {
+                append(" • ")
+                append(currencyLabel)
+            }
+        }.take(280)
+
+        val sceneWeather = root.optString("sceneWeather").trim().lowercase()
+        val rawTime = root.optString("hudTime").trim().ifBlank { "Сейчас" }
+        val normalizedTime = if (sceneWeather.isNotBlank() && !weatherHintAlreadyPresent(rawTime)) {
+            val tag = when (sceneWeather) {
+                "rain" -> "дождь"
+                "storm" -> "гроза"
+                "fog" -> "туман"
+                "snow" -> "снег"
+                "night" -> "ночь"
+                "dawn" -> "рассвет"
+                else -> ""
+            }
+            if (tag.isNotBlank()) "$rawTime, $tag" else rawTime
+        } else {
+            rawTime
+        }
+
         return GmTurnOutcome(
             narrative = narrative,
             hudLocation = root.optString("hudLocation").trim().ifBlank { "Неизвестно" },
-            hudTime = root.optString("hudTime").trim().ifBlank { "Сейчас" },
-            hudStatusAndInventory = root.optString("hudStatusAndInventory").trim().ifBlank { "В пути" },
+            hudTime = normalizedTime,
+            hudStatusAndInventory = formattedStatus,
             hudRelationsAndCanon = root.optString("hudRelationsAndCanon").trim().ifBlank { "Канон стабилен" },
             canonDeviationPercent = root.optLong("canonDeviationPercent", 0L).coerceIn(0L, 100L),
             activeNpc = activeNpc,
@@ -371,9 +514,16 @@ class GameMasterAiRepository(
         )
     }
 
+    private fun weatherHintAlreadyPresent(timeText: String): Boolean {
+        val lower = timeText.lowercase()
+        return listOf("дожд", "ливен", "гроз", "шторм", "туман", "снег", "ноч", "рассвет", "сумер", "пасмур", "ясн", "свеч", "неон")
+            .any { lower.contains(it) }
+    }
+
     private companion object {
         const val TAG = "GameMasterAiRepo"
-        const val PRIMARY_TIMEOUT_MS = 35_000L
+        const val PRIMARY_TIMEOUT_MS = 20_000L
         const val FALLBACK_TIMEOUT_MS = 35_000L
+        const val COOLDOWN_MS = 120_000L
     }
 }

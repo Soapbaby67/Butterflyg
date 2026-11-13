@@ -2,13 +2,16 @@ package com.example.ui.screens
 
 import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.foundation.BorderStroke
+import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.IntrinsicSize
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
@@ -21,6 +24,7 @@ import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.itemsIndexed
 import androidx.compose.foundation.lazy.rememberLazyListState
+import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.KeyboardActions
 import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.foundation.text.selection.SelectionContainer
@@ -28,7 +32,12 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.automirrored.filled.Send
 import androidx.compose.material.icons.automirrored.outlined.MenuBook
+import androidx.compose.material.icons.outlined.AutoAwesome
+import androidx.compose.material.icons.outlined.Bolt
+import androidx.compose.material.icons.outlined.Explore
+import androidx.compose.material.icons.outlined.Forum
 import androidx.compose.material.icons.outlined.Refresh
+import androidx.compose.material.icons.outlined.VisibilityOff
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.FilledIconButton
@@ -56,9 +65,12 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.font.FontStyle
+import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.ImeAction
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
@@ -67,9 +79,13 @@ import com.example.R
 import com.example.data.model.CampaignTurn
 import com.example.data.model.TurnChoice
 import com.example.data.repository.PaperThemeMode
+import com.example.ui.components.HudStatsParser
 import com.example.ui.components.HudStatusPanel
 import com.example.ui.components.NpcEmotionCard
 import com.example.ui.components.PaperThemeToggleButton
+import com.example.ui.components.SceneAtmosphereBanner
+import com.example.ui.theme.UniverseVisualPalette
+import com.example.ui.theme.rememberUniverseVisualPalette
 import com.example.ui.viewmodel.GameSessionData
 import com.example.ui.viewmodel.GameSessionViewModel
 import com.example.ui.viewmodel.TurnSubmissionState
@@ -91,11 +107,14 @@ fun GameSessionScreen(
     val listState = rememberLazyListState()
 
     val successData = (sessionState as? UiState.Success<GameSessionData>)?.data
+    val universePalette = rememberUniverseVisualPalette(
+        universe = successData?.campaign?.universe.orEmpty()
+    )
 
     LaunchedEffect(successData?.turns?.size, submissionState) {
         val count = successData?.turns?.size ?: 0
         if (count > 0) {
-            listState.animateScrollToItem(index = count)
+            listState.animateScrollToItem(index = count + 1)
         }
     }
 
@@ -132,7 +151,7 @@ fun GameSessionScreen(
                             Text(
                                 text = "Ход ${successData.campaign.turnCount} • ${successData.campaign.universe}",
                                 style = MaterialTheme.typography.bodySmall,
-                                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                color = universePalette.accentPrimary,
                                 maxLines = 1,
                                 overflow = TextOverflow.Ellipsis
                             )
@@ -250,7 +269,7 @@ fun GameSessionScreen(
                                 enabled = customActionText.isNotBlank() &&
                                     submissionState !is TurnSubmissionState.Generating,
                                 colors = IconButtonDefaults.filledIconButtonColors(
-                                    containerColor = MaterialTheme.colorScheme.primary,
+                                    containerColor = universePalette.accentPrimary,
                                     contentColor = MaterialTheme.colorScheme.onPrimary
                                 ),
                                 modifier = Modifier
@@ -304,6 +323,26 @@ fun GameSessionScreen(
                     val data = state.data
                     val latestTurn = data.turns.lastOrNull()
                     val isGenerating = submissionState is TurnSubmissionState.Generating
+                    val parsedStats = remember(
+                        data.campaign.hudStatusAndInventory,
+                        data.campaign.hudRelationsAndCanon,
+                        data.campaign.hudTime,
+                        data.campaign.hudLocation,
+                        data.campaign.inventory,
+                        data.campaign.universe
+                    ) {
+                        HudStatsParser.parse(data.campaign)
+                    }
+                    val activeNpcRelation = remember(data.campaign.activeNpc.name, data.campaign.npcs) {
+                        val npcName = data.campaign.activeNpc.name.trim()
+                        if (npcName.isBlank()) {
+                            null
+                        } else {
+                            data.campaign.npcs.firstOrNull {
+                                it.name.equals(npcName, ignoreCase = true)
+                            }
+                        }
+                    }
 
                     Column(
                         modifier = Modifier
@@ -311,11 +350,9 @@ fun GameSessionScreen(
                             .widthIn(max = 720.dp)
                     ) {
                         HudStatusPanel(
-                            hudLocation = data.campaign.hudLocation,
-                            hudTime = data.campaign.hudTime,
-                            hudStatusAndInventory = data.campaign.hudStatusAndInventory,
-                            hudRelationsAndCanon = data.campaign.hudRelationsAndCanon,
-                            canonDeviationPercent = data.campaign.canonDeviationPercent,
+                            campaign = data.campaign,
+                            stats = parsedStats,
+                            palette = universePalette,
                             modifier = Modifier.padding(horizontal = 16.dp, vertical = 6.dp)
                         )
 
@@ -324,12 +361,22 @@ fun GameSessionScreen(
                             contentPadding = PaddingValues(
                                 start = 16.dp,
                                 end = 16.dp,
-                                top = 8.dp,
+                                top = 6.dp,
                                 bottom = 24.dp
                             ),
                             verticalArrangement = Arrangement.spacedBy(16.dp),
                             modifier = Modifier.weight(1f)
                         ) {
+                            item(key = "scene_banner") {
+                                SceneAtmosphereBanner(
+                                    universe = data.campaign.universe,
+                                    location = data.campaign.hudLocation,
+                                    timeLabel = data.campaign.hudTime,
+                                    weatherMood = parsedStats.weatherMood,
+                                    palette = universePalette
+                                )
+                            }
+
                             itemsIndexed(
                                 items = data.turns,
                                 key = { _, turn -> turn.id.ifBlank { turn.turnNumber.toString() } }
@@ -337,18 +384,26 @@ fun GameSessionScreen(
                                 val isLatest = index == data.turns.lastIndex
                                 TurnChapterBlock(
                                     turn = turn,
-                                    isLatest = isLatest
+                                    isLatest = isLatest,
+                                    palette = universePalette
                                 )
                             }
 
-                            item {
+                            item(key = "npc_and_choices_footer") {
                                 Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
-                                    // Prominent NPC Emotion Indicator for the character in the current scene
-                                    NpcEmotionCard(npc = data.campaign.activeNpc)
+                                    NpcEmotionCard(
+                                        npc = data.campaign.activeNpc,
+                                        universe = data.campaign.universe,
+                                        palette = universePalette,
+                                        npcRelation = activeNpcRelation
+                                    )
 
                                     if (isGenerating) {
                                         val pending = (submissionState as TurnSubmissionState.Generating).pendingAction
-                                        GeneratingTurnCard(pendingAction = pending)
+                                        GeneratingTurnCard(
+                                            pendingAction = pending,
+                                            palette = universePalette
+                                        )
                                     } else if (latestTurn != null && latestTurn.choices.isNotEmpty()) {
                                         Text(
                                             text = "Ваш выбор",
@@ -358,6 +413,7 @@ fun GameSessionScreen(
                                         latestTurn.choices.forEach { choice ->
                                             ChoiceActionCard(
                                                 choice = choice,
+                                                palette = universePalette,
                                                 onClick = { viewModel.submitPlayerAction(choice.text) }
                                             )
                                         }
@@ -382,20 +438,21 @@ fun GameSessionScreen(
 @Composable
 private fun TurnChapterBlock(
     turn: CampaignTurn,
-    isLatest: Boolean
+    isLatest: Boolean,
+    palette: UniverseVisualPalette
 ) {
     Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
         if (turn.turnNumber > 1L && turn.playerAction.isNotBlank()) {
             Surface(
-                color = MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.55f),
+                color = palette.accentPrimary.copy(alpha = 0.12f),
                 shape = MaterialTheme.shapes.medium,
-                border = BorderStroke(1.dp, MaterialTheme.colorScheme.primary.copy(alpha = 0.25f)),
+                border = BorderStroke(1.dp, palette.accentPrimary.copy(alpha = 0.30f)),
                 modifier = Modifier.fillMaxWidth()
             ) {
                 Text(
                     text = "Вы: ${turn.playerAction}",
                     style = MaterialTheme.typography.bodyMedium.copy(fontStyle = FontStyle.Italic),
-                    color = MaterialTheme.colorScheme.onPrimaryContainer,
+                    color = MaterialTheme.colorScheme.onBackground,
                     modifier = Modifier.padding(horizontal = 14.dp, vertical = 10.dp)
                 )
             }
@@ -409,7 +466,8 @@ private fun TurnChapterBlock(
             Text(
                 text = "Глава ${turn.turnNumber}",
                 style = MaterialTheme.typography.labelMedium,
-                color = MaterialTheme.colorScheme.secondary
+                fontWeight = FontWeight.SemiBold,
+                color = palette.accentPrimary
             )
             HorizontalDivider(
                 color = MaterialTheme.colorScheme.outlineVariant,
@@ -432,53 +490,104 @@ private fun TurnChapterBlock(
 @Composable
 private fun ChoiceActionCard(
     choice: TurnChoice,
+    palette: UniverseVisualPalette,
     onClick: () -> Unit
 ) {
+    val (approachColor, approachIcon) = resolveApproachVisuals(choice.approach, palette)
+
     Surface(
         color = MaterialTheme.colorScheme.surface,
         shape = MaterialTheme.shapes.medium,
-        border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant),
-        tonalElevation = 1.dp,
+        border = BorderStroke(1.dp, approachColor.copy(alpha = 0.38f)),
+        tonalElevation = 2.dp,
         modifier = Modifier
             .fillMaxWidth()
             .clip(MaterialTheme.shapes.medium)
             .clickable(onClick = onClick)
             .testTag("choice_button_${choice.id}")
     ) {
-        Column(
+        Row(
             modifier = Modifier
+                .fillMaxWidth()
+                .height(IntrinsicSize.Min)
                 .minimumInteractiveComponentSize()
-                .padding(horizontal = 14.dp, vertical = 12.dp),
-            verticalArrangement = Arrangement.spacedBy(5.dp)
         ) {
-            if (choice.approach.isNotBlank()) {
-                Surface(
-                    color = MaterialTheme.colorScheme.secondaryContainer,
-                    contentColor = MaterialTheme.colorScheme.onSecondaryContainer,
-                    shape = MaterialTheme.shapes.small
-                ) {
-                    Text(
-                        text = choice.approach,
-                        style = MaterialTheme.typography.labelSmall,
-                        modifier = Modifier.padding(horizontal = 8.dp, vertical = 3.dp)
-                    )
-                }
-            }
-            Text(
-                text = choice.text,
-                style = MaterialTheme.typography.bodyMedium,
-                color = MaterialTheme.colorScheme.onSurface
+            Box(
+                modifier = Modifier
+                    .width(4.dp)
+                    .fillMaxHeight()
+                    .background(approachColor)
             )
+
+            Column(
+                modifier = Modifier
+                    .weight(1f)
+                    .padding(horizontal = 14.dp, vertical = 12.dp),
+                verticalArrangement = Arrangement.spacedBy(6.dp)
+            ) {
+                if (choice.approach.isNotBlank()) {
+                    Surface(
+                        color = approachColor.copy(alpha = 0.14f),
+                        contentColor = approachColor,
+                        shape = RoundedCornerShape(999.dp)
+                    ) {
+                        Row(
+                            verticalAlignment = Alignment.CenterVertically,
+                            horizontalArrangement = Arrangement.spacedBy(5.dp),
+                            modifier = Modifier.padding(horizontal = 9.dp, vertical = 3.dp)
+                        ) {
+                            Icon(
+                                imageVector = approachIcon,
+                                contentDescription = null,
+                                modifier = Modifier.size(13.dp)
+                            )
+                            Text(
+                                text = choice.approach,
+                                style = MaterialTheme.typography.labelSmall,
+                                fontWeight = FontWeight.SemiBold
+                            )
+                        }
+                    }
+                }
+                Text(
+                    text = choice.text,
+                    style = MaterialTheme.typography.bodyMedium,
+                    color = MaterialTheme.colorScheme.onSurface
+                )
+            }
         }
     }
 }
 
+private fun resolveApproachVisuals(
+    approach: String,
+    palette: UniverseVisualPalette
+): Pair<Color, ImageVector> {
+    val lower = approach.lowercase()
+    return when {
+        lower.contains("сил") || lower.contains("атак") || lower.contains("бой") ->
+            palette.choiceForceColor to Icons.Outlined.Bolt
+        lower.contains("диплом") || lower.contains("перегов") || lower.contains("убеж") ->
+            palette.choiceDiplomacyColor to Icons.Outlined.Forum
+        lower.contains("скрыт") || lower.contains("тайн") || lower.contains("обман") ||
+            lower.contains("тень") ->
+            palette.choiceStealthColor to Icons.Outlined.VisibilityOff
+        lower.contains("нестандарт") || lower.contains("хитр") || lower.contains("маг") ->
+            palette.choiceWildcardColor to Icons.Outlined.AutoAwesome
+        else ->
+            palette.accentPrimary to Icons.Outlined.Explore
+    }
+}
+
 @Composable
-private fun GeneratingTurnCard(pendingAction: String) {
+private fun GeneratingTurnCard(
+    pendingAction: String,
+    palette: UniverseVisualPalette
+) {
     Surface(
         color = MaterialTheme.colorScheme.surface,
         shape = MaterialTheme.shapes.medium,
-        border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant),
+        border = BorderStroke(1.dp, palette.accentPrimary.copy(alpha = 0.35f)),
         modifier = Modifier.fillMaxWidth()
     ) {
         Column(
@@ -492,13 +601,13 @@ private fun GeneratingTurnCard(pendingAction: String) {
             )
             LinearProgressIndicator(
                 modifier = Modifier.fillMaxWidth(),
-                color = MaterialTheme.colorScheme.primary,
+                color = palette.accentPrimary,
                 trackColor = MaterialTheme.colorScheme.outlineVariant
             )
             Text(
                 text = "Мастер плетёт нити событий и оценивает последствия…",
                 style = MaterialTheme.typography.bodySmall,
-                color = MaterialTheme.colorScheme.primary
+                color = palette.accentPrimary
             )
         }
     }

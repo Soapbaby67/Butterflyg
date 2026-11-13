@@ -50,7 +50,8 @@ data class NpcRelation(
     val trustLevel: Long = 0L,
     val statusLabel: String = "",
     val lastEmotion: String = "",
-    val lastEmotionCategory: String = "neutral"
+    val lastEmotionCategory: String = "neutral",
+    val archetype: String = ""
 ) {
     fun toFirestoreMap(): Map<String, Any> = mapOf(
         "name" to name.take(100),
@@ -58,7 +59,8 @@ data class NpcRelation(
         "trustLevel" to trustLevel.coerceIn(-100L, 100L),
         "statusLabel" to statusLabel.take(100),
         "lastEmotion" to lastEmotion.take(80),
-        "lastEmotionCategory" to EmotionCategory.fromKey(lastEmotionCategory).key
+        "lastEmotionCategory" to EmotionCategory.fromKey(lastEmotionCategory).key,
+        "archetype" to archetype.take(32)
     )
 }
 

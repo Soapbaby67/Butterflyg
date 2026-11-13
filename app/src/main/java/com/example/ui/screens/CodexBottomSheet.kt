@@ -39,6 +39,9 @@ import com.example.data.model.ButterflyEvent
 import com.example.data.model.Campaign
 import com.example.data.model.NpcRelation
 import com.example.ui.components.EmotionBadgeChip
+import com.example.ui.components.NpcPortraitAvatar
+import com.example.ui.theme.UniverseVisualPalette
+import com.example.ui.theme.rememberUniverseVisualPalette
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -49,6 +52,7 @@ fun CodexBottomSheet(
     val sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true)
     var selectedTab by remember { mutableIntStateOf(0) }
     val tabs = listOf("Персонаж", "Отношения (${campaign.npcs.size})", "Эффект бабочки")
+    val universePalette = rememberUniverseVisualPalette(campaign.universe)
 
     ModalBottomSheet(
         onDismissRequest = onDismiss,
@@ -69,7 +73,7 @@ fun CodexBottomSheet(
             Text(
                 text = campaign.universe,
                 style = MaterialTheme.typography.bodySmall,
-                color = MaterialTheme.colorScheme.primary,
+                color = universePalette.accentPrimary,
                 modifier = Modifier.padding(horizontal = 20.dp)
             )
 
@@ -96,7 +100,11 @@ fun CodexBottomSheet(
 
             when (selectedTab) {
                 0 -> CharacterAndInventoryTab(campaign)
-                1 -> NpcRelationsTab(campaign.npcs)
+                1 -> NpcRelationsTab(
+                    npcs = campaign.npcs,
+                    universe = campaign.universe,
+                    palette = universePalette
+                )
                 2 -> ButterflyTimelineTab(campaign)
             }
         }
@@ -159,7 +167,11 @@ private fun CharacterAndInventoryTab(campaign: Campaign) {
 }
 
 @Composable
-private fun NpcRelationsTab(npcs: List<NpcRelation>) {
+private fun NpcRelationsTab(
+    npcs: List<NpcRelation>,
+    universe: String,
+    palette: UniverseVisualPalette
+) {
     if (npcs.isEmpty()) {
         Column(
             modifier = Modifier
@@ -190,13 +202,24 @@ private fun NpcRelationsTab(npcs: List<NpcRelation>) {
             ) {
                 Column(
                     modifier = Modifier.padding(14.dp),
-                    verticalArrangement = Arrangement.spacedBy(8.dp)
+                    verticalArrangement = Arrangement.spacedBy(10.dp)
                 ) {
                     Row(
                         modifier = Modifier.fillMaxWidth(),
-                        horizontalArrangement = Arrangement.SpaceBetween,
+                        horizontalArrangement = Arrangement.spacedBy(12.dp),
                         verticalAlignment = Alignment.CenterVertically
                     ) {
+                        NpcPortraitAvatar(
+                            name = npc.name,
+                            role = npc.role,
+                            universe = universe,
+                            explicitArchetype = npc.archetype,
+                            emotionCategory = npc.lastEmotionCategory,
+                            intensity = 3L,
+                            palette = palette,
+                            size = 50.dp
+                        )
+
                         Column(modifier = Modifier.weight(1f)) {
                             Text(
                                 text = npc.name,
@@ -227,7 +250,7 @@ private fun NpcRelationsTab(npcs: List<NpcRelation>) {
                         Text(
                             text = npc.statusLabel.ifBlank { "Нейтралитет" },
                             style = MaterialTheme.typography.labelMedium,
-                            color = MaterialTheme.colorScheme.primary
+                            color = palette.accentPrimary
                         )
                         val normalizedTrust = ((npc.trustLevel + 100L).coerceIn(0L, 200L)) / 200f
                         LinearProgressIndicator(
@@ -237,9 +260,9 @@ private fun NpcRelationsTab(npcs: List<NpcRelation>) {
                                 .height(6.dp)
                                 .clip(RoundedCornerShape(999.dp)),
                             color = if (npc.trustLevel >= 0L) {
-                                MaterialTheme.colorScheme.secondary
+                                palette.trustPositive
                             } else {
-                                MaterialTheme.colorScheme.error
+                                palette.trustNegative
                             },
                             trackColor = MaterialTheme.colorScheme.outlineVariant
                         )
