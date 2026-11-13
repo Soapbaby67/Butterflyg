@@ -1,0 +1,179 @@
+{
+  "entities": {
+    "Campaign": {
+      "title": "Campaign",
+      "description": "User-owned interactive text RPG campaign slot with 4-question world setup, HUD state, active NPC emotion, inventory, NPC relationships, and butterfly-effect timeline.",
+      "type": "object",
+      "properties": {
+        "userId": {
+          "type": "string",
+          "description": "Owner Firebase Auth UID."
+        },
+        "title": {
+          "type": "string",
+          "description": "Display title of the RPG chronicle."
+        },
+        "universe": {
+          "type": "string",
+          "description": "Question 1: Chosen universe (anime, book, series, game, or original world)."
+        },
+        "characterSummary": {
+          "type": "string",
+          "description": "Question 2: Player character role (canon, OC, or isekai), name, skills, and starting traits."
+        },
+        "startingPoint": {
+          "type": "string",
+          "description": "Question 3: Story moment and starting location."
+        },
+        "toneAndDifficulty": {
+          "type": "string",
+          "description": "Question 4: Atmosphere tone and harshness of consequences."
+        },
+        "turnCount": {
+          "type": "integer",
+          "description": "Number of completed narrative turns."
+        },
+        "hudLocation": {
+          "type": "string",
+          "description": "Current HUD location."
+        },
+        "hudTime": {
+          "type": "string",
+          "description": "Current HUD in-world time."
+        },
+        "hudStatusAndInventory": {
+          "type": "string",
+          "description": "Compact HUD condition and key items summary."
+        },
+        "hudRelationsAndCanon": {
+          "type": "string",
+          "description": "Compact HUD relations and canon impact summary."
+        },
+        "canonDeviationPercent": {
+          "type": "integer",
+          "description": "Estimated butterfly-effect deviation from original canon (0 to 100)."
+        },
+        "activeNpc": {
+          "type": "object",
+          "description": "Snapshot of the currently interacting NPC and their visible emotional state."
+        },
+        "inventory": {
+          "type": "array",
+          "description": "Bounded list of character inventory items."
+        },
+        "npcs": {
+          "type": "array",
+          "description": "Bounded list of encountered NPC relationship snapshots."
+        },
+        "butterflyEvents": {
+          "type": "array",
+          "description": "Bounded list of canon-altering butterfly effect milestones."
+        },
+        "storySummary": {
+          "type": "string",
+          "description": "Rolling summary of the campaign plot so far."
+        },
+        "createdAt": {
+          "type": "string",
+          "format": "date-time",
+          "description": "Server timestamp set via FieldValue.serverTimestamp()."
+        },
+        "updatedAt": {
+          "type": "string",
+          "format": "date-time",
+          "description": "Server timestamp updated via FieldValue.serverTimestamp()."
+        }
+      },
+      "required": [
+        "userId",
+        "title",
+        "universe",
+        "characterSummary",
+        "startingPoint",
+        "toneAndDifficulty",
+        "turnCount",
+        "hudLocation",
+        "hudTime",
+        "hudStatusAndInventory",
+        "hudRelationsAndCanon",
+        "canonDeviationPercent",
+        "activeNpc",
+        "inventory",
+        "npcs",
+        "butterflyEvents",
+        "storySummary",
+        "createdAt",
+        "updatedAt"
+      ]
+    },
+    "CampaignTurn": {
+      "title": "CampaignTurn",
+      "description": "Immutable narrative turn in an RPG campaign including player action, GM prose, HUD snapshot, active NPC emotion, and branching choices.",
+      "type": "object",
+      "properties": {
+        "userId": {
+          "type": "string",
+          "description": "Owner Firebase Auth UID."
+        },
+        "campaignId": {
+          "type": "string",
+          "description": "Parent campaign document ID."
+        },
+        "turnNumber": {
+          "type": "integer",
+          "description": "1-based turn index."
+        },
+        "playerAction": {
+          "type": "string",
+          "description": "Action chosen or typed by the player before this turn."
+        },
+        "narrative": {
+          "type": "string",
+          "description": "2-4 paragraphs of anti-godmodding GM narrative prose."
+        },
+        "hudLine": {
+          "type": "string",
+          "description": "Formatted HUD line for this turn."
+        },
+        "activeNpc": {
+          "type": "object",
+          "description": "Interacting NPC emotion snapshot during this turn."
+        },
+        "choices": {
+          "type": "array",
+          "description": "3-4 distinct branching choices offered at the end of this turn."
+        },
+        "createdAt": {
+          "type": "string",
+          "format": "date-time",
+          "description": "Server timestamp set via FieldValue.serverTimestamp()."
+        }
+      },
+      "required": [
+        "userId",
+        "campaignId",
+        "turnNumber",
+        "playerAction",
+        "narrative",
+        "hudLine",
+        "activeNpc",
+        "choices",
+        "createdAt"
+      ]
+    }
+  },
+  "firestore": {
+    "/users/{userId}/campaigns/{campaignId}": {
+      "schema": {
+        "$ref": "#/entities/Campaign"
+      },
+      "description": "Per-user RPG campaign slots and live game state."
+    },
+    "/users/{userId}/campaigns/{campaignId}/turns/{turnId}": {
+      "schema": {
+        "$ref": "#/entities/CampaignTurn"
+      },
+      "description": "Ordered narrative turn history for a specific RPG campaign."
+    }
+  }
+}

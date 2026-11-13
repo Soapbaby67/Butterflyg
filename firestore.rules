@@ -1,0 +1,135 @@
+rules_version = '2';
+service cloud.firestore {
+  match /databases/{database}/documents {
+    // Global default-deny safety net
+    match /{document=**} {
+      allow read, write: if false;
+    }
+
+    function isSignedIn() {
+      return request.auth != null;
+    }
+
+    function isValidId(id) {
+      return id is string && id.size() >= 1 && id.size() <= 128 && id.matches('^[a-zA-Z0-9_\\-]+$');
+    }
+
+    function incoming() {
+      return request.resource.data;
+    }
+
+    function existing() {
+      return resource.data;
+    }
+
+    function isValidNpcEmotionSnapshot(npc) {
+      return npc is map &&
+             npc.keys().hasAll(['hasActiveNpc', 'name', 'emotionLabel', 'emotionCategory', 'intensity', 'note']) &&
+             npc.keys().hasOnly(['hasActiveNpc', 'name', 'emotionLabel', 'emotionCategory', 'intensity', 'note']) &&
+             npc.hasActiveNpc is bool &&
+             npc.name is string && npc.name.size() <= 100 &&
+             npc.emotionLabel is string && npc.emotionLabel.size() <= 80 &&
+             npc.emotionCategory is string &&
+             npc.emotionCategory in ['joy', 'embarrassment', 'anger', 'fear', 'suspicion', 'sadness', 'surprise', 'calm', 'neutral'] &&
+             npc.intensity is int && npc.intensity >= 0 && npc.intensity <= 5 &&
+             npc.note is string && npc.note.size() <= 300;
+    }
+
+    function isValidCampaign(data) {
+      return data.userId is string && data.userId == request.auth.uid &&
+             data.title is string && data.title.size() >= 1 && data.title.size() <= 120 &&
+             data.universe is string && data.universe.size() >= 1 && data.universe.size() <= 300 &&
+             data.characterSummary is string && data.characterSummary.size() >= 1 && data.characterSummary.size() <= 600 &&
+             data.startingPoint is string && data.startingPoint.size() >= 1 && data.startingPoint.size() <= 400 &&
+             data.toneAndDifficulty is string && data.toneAndDifficulty.size() >= 1 && data.toneAndDifficulty.size() <= 300 &&
+             data.turnCount is int && data.turnCount >= 0 && data.turnCount <= 100000 &&
+             data.hudLocation is string && data.hudLocation.size() <= 200 &&
+             data.hudTime is string && data.hudTime.size() <= 120 &&
+             data.hudStatusAndInventory is string && data.hudStatusAndInventory.size() <= 300 &&
+             data.hudRelationsAndCanon is string && data.hudRelationsAndCanon.size() <= 300 &&
+             data.canonDeviationPercent is int && data.canonDeviationPercent >= 0 && data.canonDeviationPercent <= 100 &&
+             isValidNpcEmotionSnapshot(data.activeNpc) &&
+             data.inventory is list && data.inventory.size() <= 60 && (data.inventory.size() == 0 || data.inventory[0] is string) &&
+             data.npcs is list && data.npcs.size() <= 60 && (data.npcs.size() == 0 || data.npcs[0] is map) &&
+             data.butterflyEvents is list && data.butterflyEvents.size() <= 60 && (data.butterflyEvents.size() == 0 || data.butterflyEvents[0] is map) &&
+             data.storySummary is string && data.storySummary.size() <= 4000;
+    }
+
+    function isValidTurn(data, campaignId) {
+      return data.userId is string && data.userId == request.auth.uid &&
+             data.campaignId is string && data.campaignId == campaignId &&
+             data.turnNumber is int && data.turnNumber >= 1 && data.turnNumber <= 100000 &&
+             data.playerAction is string && data.playerAction.size() <= 1200 &&
+             data.narrative is string && data.narrative.size() >= 1 && data.narrative.size() <= 12000 &&
+             data.hudLine is string && data.hudLine.size() <= 600 &&
+             isValidNpcEmotionSnapshot(data.activeNpc) &&
+             data.choices is list && data.choices.size() <= 6 && (data.choices.size() == 0 || data.choices[0] is map);
+    }
+
+    match /users/{userId}/campaigns/{campaignId} {
+      allow get: if isSignedIn() && request.auth.uid == userId && isValidId(campaignId);
+      allow list: if isSignedIn() && request.auth.uid == userId;
+
+      allow create: if isSignedIn() &&
+                       request.auth.uid == userId &&
+                       isValidId(campaignId) &&
+                       incoming().keys().hasAll([
+                         'userId', 'title', 'universe', 'characterSummary', 'startingPoint',
+                         'toneAndDifficulty', 'turnCount', 'hudLocation', 'hudTime',
+                         'hudStatusAndInventory', 'hudRelationsAndCanon', 'canonDeviationPercent',
+                         'activeNpc', 'inventory', 'npcs', 'butterflyEvents', 'storySummary',
+                         'createdAt', 'updatedAt'
+                       ]) &&
+                       incoming().keys().hasOnly([
+                         'userId', 'title', 'universe', 'characterSummary', 'startingPoint',
+                         'toneAndDifficulty', 'turnCount', 'hudLocation', 'hudTime',
+                         'hudStatusAndInventory', 'hudRelationsAndCanon', 'canonDeviationPercent',
+                         'activeNpc', 'inventory', 'npcs', 'butterflyEvents', 'storySummary',
+                         'createdAt', 'updatedAt'
+                       ]) &&
+                       incoming().createdAt is timestamp && incoming().createdAt <= request.time &&
+                       incoming().updatedAt is timestamp && incoming().updatedAt <= request.time &&
+                       isValidCampaign(incoming());
+
+      allow update: if isSignedIn() &&
+                       request.auth.uid == userId &&
+                       isValidId(campaignId) &&
+                       isValidCampaign(incoming()) &&
+                       incoming().userId == existing().userId &&
+                       incoming().createdAt == existing().createdAt &&
+                       incoming().updatedAt is timestamp && incoming().updatedAt <= request.time &&
+                       incoming().diff(existing()).affectedKeys().hasOnly([
+                         'title', 'turnCount', 'hudLocation', 'hudTime',
+                         'hudStatusAndInventory', 'hudRelationsAndCanon', 'canonDeviationPercent',
+                         'activeNpc', 'inventory', 'npcs', 'butterflyEvents', 'storySummary',
+                         'updatedAt'
+                       ]);
+
+      allow delete: if isSignedIn() && request.auth.uid == userId && isValidId(campaignId);
+
+      match /turns/{turnId} {
+        allow get: if isSignedIn() && request.auth.uid == userId && isValidId(campaignId) && isValidId(turnId);
+        allow list: if isSignedIn() && request.auth.uid == userId && isValidId(campaignId);
+
+        allow create: if isSignedIn() &&
+                         request.auth.uid == userId &&
+                         isValidId(campaignId) &&
+                         isValidId(turnId) &&
+                         existsAfter(/databases/$(database)/documents/users/$(userId)/campaigns/$(campaignId)) &&
+                         incoming().keys().hasAll([
+                           'userId', 'campaignId', 'turnNumber', 'playerAction',
+                           'narrative', 'hudLine', 'activeNpc', 'choices', 'createdAt'
+                         ]) &&
+                         incoming().keys().hasOnly([
+                           'userId', 'campaignId', 'turnNumber', 'playerAction',
+                           'narrative', 'hudLine', 'activeNpc', 'choices', 'createdAt'
+                         ]) &&
+                         incoming().createdAt is timestamp && incoming().createdAt <= request.time &&
+                         isValidTurn(incoming(), campaignId);
+
+        allow update: if false;
+        allow delete: if isSignedIn() && request.auth.uid == userId && isValidId(campaignId) && isValidId(turnId);
+      }
+    }
+  }
+}

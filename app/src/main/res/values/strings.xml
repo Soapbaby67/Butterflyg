@@ -1,0 +1,13 @@
+<resources>
+    <string name="app_name">Хроники Бабочки</string>
+    <string name="sign_in_title">Хроники Бабочки</string>
+    <string name="sign_in_subtitle">Интерактивная текстовая RPG с эффектом бабочки, живыми эмоциями NPC и облачной библиотекой ваших миров</string>
+    <string name="sign_in_with_google">Войти через Google</string>
+    <string name="shelf_title">Полка хроник</string>
+    <string name="new_chronicle">Новая хроника</string>
+    <string name="setup_title">Настройка сессии</string>
+    <string name="start_game">Открыть первую сцену</string>
+    <string name="codex_title">Кодекс хроники</string>
+    <string name="custom_action_hint">Напишите своё действие…</string>
+    <string name="send_action">Отправить</string>
+</resources>
