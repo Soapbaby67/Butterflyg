@@ -19,7 +19,9 @@ import kotlinx.coroutines.TimeoutCancellationException
 import kotlinx.coroutines.withTimeout
 import org.json.JSONObject
 
-class GameMasterAiRepository {
+class GameMasterAiRepository(
+    private val debugTokenProvider: () -> String? = { null }
+) {
 
     private val emotionCategories = listOf(
         "joy",
@@ -213,10 +215,22 @@ class GameMasterAiRepository {
             throw e
         } catch (e: Exception) {
             Log.e(TAG, "Firebase AI generation failed", e)
-            throw IllegalStateException(
-                e.localizedMessage ?: "Не удалось получить ответ от ИИ-мастера.",
-                e
-            )
+            val rawMessage = e.localizedMessage ?: "Не удалось получить ответ от ИИ-мастера."
+            val debugToken = if (
+                rawMessage.contains("App Check", ignoreCase = true) ||
+                rawMessage.contains("token is invalid", ignoreCase = true) ||
+                rawMessage.contains("403", ignoreCase = true)
+            ) {
+                debugTokenProvider()
+            } else {
+                null
+            }
+            val finalMessage = if (!debugToken.isNullOrBlank()) {
+                "$rawMessage\n\nDebug-токен этого телефона:\n$debugToken\n\nДобавьте его в Firebase Console → App Check → Apps → Manage debug tokens."
+            } else {
+                rawMessage
+            }
+            throw IllegalStateException(finalMessage, e)
         }
     }
 

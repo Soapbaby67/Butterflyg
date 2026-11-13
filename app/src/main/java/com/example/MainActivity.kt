@@ -30,6 +30,7 @@ import com.example.auth.attemptAutoSignIn
 import com.example.auth.findActivity
 import com.example.auth.signOutUser
 import com.example.core.configureAppCheck
+import com.example.core.getLocalAppCheckDebugToken
 import com.example.data.repository.CampaignRepository
 import com.example.data.repository.GameMasterAiRepository
 import com.example.data.repository.PaperThemeMode
@@ -170,7 +171,12 @@ private fun AuthenticatedNavHost(
     onSignOut: () -> Unit
 ) {
     val navController = rememberNavController()
-    val aiRepository = remember { GameMasterAiRepository() }
+    val appContext = LocalContext.current.applicationContext
+    val aiRepository = remember(appContext) {
+        GameMasterAiRepository(
+            debugTokenProvider = { getLocalAppCheckDebugToken(appContext) }
+        )
+    }
 
     NavHost(
         navController = navController,
