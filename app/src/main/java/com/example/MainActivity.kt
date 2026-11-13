@@ -6,11 +6,14 @@ import androidx.activity.compose.setContent
 import androidx.activity.enableEdgeToEdge
 import androidx.compose.foundation.isSystemInDarkTheme
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.key
+import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.platform.LocalContext
 import androidx.credentials.CredentialManager
 import androidx.lifecycle.ViewModelProvider.AndroidViewModelFactory.Companion.APPLICATION_KEY
@@ -24,7 +27,7 @@ import androidx.navigation.compose.composable
 import androidx.navigation.compose.rememberNavController
 import androidx.navigation.navArgument
 import com.example.auth.attemptAutoSignIn
-import com.example.auth.authStateFlow
+import com.example.auth.findActivity
 import com.example.auth.signOutUser
 import com.example.core.configureAppCheck
 import com.example.data.repository.CampaignRepository
@@ -40,8 +43,10 @@ import com.example.ui.viewmodel.CampaignsViewModel
 import com.example.ui.viewmodel.GameSessionViewModel
 import com.example.ui.viewmodel.SetupWizardViewModel
 import com.google.firebase.Firebase
+import com.google.firebase.auth.FirebaseAuth
 import com.google.firebase.auth.auth
 import com.google.firebase.firestore.FirebaseFirestore
+import kotlinx.coroutines.Job
 import kotlinx.coroutines.launch
 
 private const val ROUTE_CAMPAIGNS = "campaigns"
@@ -98,19 +103,29 @@ fun AppNavigation(
     onCycleTheme: () -> Unit
 ) {
     val context = LocalContext.current
+    val activityContext = remember(context) { context.findActivity() ?: context }
     val auth = Firebase.auth
-    val currentUser by auth.authStateFlow().collectAsStateWithLifecycle(
-        initialValue = auth.currentUser
-    )
+    var currentUser by remember { mutableStateOf(auth.currentUser) }
     val coroutineScope = rememberCoroutineScope()
-    val credentialManager = remember(context) { CredentialManager.create(context) }
+    val credentialManager = remember(activityContext) { CredentialManager.create(activityContext) }
+    var autoSignInJob by remember { mutableStateOf<Job?>(null) }
+
+    DisposableEffect(auth) {
+        val listener = FirebaseAuth.AuthStateListener { firebaseAuth ->
+            currentUser = firebaseAuth.currentUser
+        }
+        auth.addAuthStateListener(listener)
+        onDispose {
+            auth.removeAuthStateListener(listener)
+        }
+    }
 
     LaunchedEffect(Unit) {
         if (auth.currentUser == null) {
-            attemptAutoSignIn(
-                context = context,
+            autoSignInJob = attemptAutoSignIn(
+                context = activityContext,
                 credentialManager = credentialManager,
-                onAuthSuccess = {},
+                onAuthSuccess = { currentUser = Firebase.auth.currentUser },
                 onUnauthenticated = {},
                 scope = coroutineScope
             )
@@ -122,7 +137,11 @@ fun AppNavigation(
         AuthScreen(
             themeMode = themeMode,
             onCycleTheme = onCycleTheme,
-            onAuthSuccess = {}
+            onAuthSuccess = { currentUser = Firebase.auth.currentUser },
+            onBeforeInteractiveSignIn = {
+                autoSignInJob?.cancel()
+                autoSignInJob = null
+            }
         )
     } else {
         key(user.uid) {

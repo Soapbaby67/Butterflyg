@@ -46,6 +46,7 @@ import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import androidx.credentials.CredentialManager
 import com.example.R
+import com.example.auth.findActivity
 import com.example.auth.onGoogleSignInClicked
 import com.example.data.repository.PaperThemeMode
 import com.example.ui.components.PaperThemeToggleButton
@@ -54,11 +55,13 @@ import com.example.ui.components.PaperThemeToggleButton
 fun AuthScreen(
     themeMode: PaperThemeMode,
     onCycleTheme: () -> Unit,
-    onAuthSuccess: () -> Unit
+    onAuthSuccess: () -> Unit,
+    onBeforeInteractiveSignIn: () -> Unit = {}
 ) {
     val context = LocalContext.current
+    val activityContext = remember(context) { context.findActivity() ?: context }
     val coroutineScope = rememberCoroutineScope()
-    val credentialManager = remember(context) { CredentialManager.create(context) }
+    val credentialManager = remember(activityContext) { CredentialManager.create(activityContext) }
 
     var isLoading by remember { mutableStateOf(false) }
     var errorMessage by remember { mutableStateOf<String?>(null) }
@@ -175,10 +178,11 @@ fun AuthScreen(
 
                 Button(
                     onClick = {
+                        onBeforeInteractiveSignIn()
                         isLoading = true
                         errorMessage = null
                         onGoogleSignInClicked(
-                            context = context,
+                            context = activityContext,
                             credentialManager = credentialManager,
                             onAuthSuccess = {
                                 isLoading = false
@@ -189,8 +193,11 @@ fun AuthScreen(
                                 errorMessage = msg
                             },
                             scope = coroutineScope,
-                            onAuthCancelled = {
+                            onAuthCancelled = { reason ->
                                 isLoading = false
+                                if (!reason.isNullOrBlank()) {
+                                    errorMessage = reason
+                                }
                             }
                         )
                     },
