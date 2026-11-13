@@ -28,6 +28,7 @@ import androidx.compose.material.icons.outlined.AutoStories
 import androidx.compose.material.icons.outlined.DeleteOutline
 import androidx.compose.material.icons.outlined.Explore
 import androidx.compose.material.icons.outlined.FavoriteBorder
+import androidx.compose.material.icons.outlined.Info
 import androidx.compose.material.icons.outlined.Settings
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.CircularProgressIndicator
@@ -90,6 +91,7 @@ fun CampaignsScreen(
     hapticsEnabled: Boolean,
     onCycleTheme: () -> Unit,
     onOpenSettings: () -> Unit,
+    onOpenPresentation: () -> Unit,
     onSignOut: () -> Unit,
     onCreateNewCampaign: (templateId: String?) -> Unit,
     onOpenCampaign: (campaignId: String) -> Unit
@@ -141,6 +143,20 @@ fun CampaignsScreen(
                             onCycleTheme()
                         }
                     )
+                    IconButton(
+                        onClick = {
+                            haptics.tap()
+                            onOpenPresentation()
+                        },
+                        modifier = Modifier
+                            .minimumInteractiveComponentSize()
+                            .testTag("open_presentation_button")
+                    ) {
+                        Icon(
+                            imageVector = Icons.Outlined.Info,
+                            contentDescription = "Презентация приложения"
+                        )
+                    }
                     IconButton(
                         onClick = {
                             haptics.tap()

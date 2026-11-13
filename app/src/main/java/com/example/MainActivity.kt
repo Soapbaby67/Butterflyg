@@ -40,6 +40,7 @@ import com.example.data.repository.UserAppSettings
 import com.example.ui.screens.AuthScreen
 import com.example.ui.screens.CampaignsScreen
 import com.example.ui.screens.GameSessionScreen
+import com.example.ui.screens.PresentationScreen
 import com.example.ui.screens.SettingsBottomSheet
 import com.example.ui.screens.SetupWizardScreen
 import com.example.ui.theme.ChroniclesTheme
@@ -56,6 +57,7 @@ import kotlinx.coroutines.launch
 private const val ROUTE_CAMPAIGNS = "campaigns"
 private const val ROUTE_SETUP = "setup?templateId={templateId}"
 private const val ROUTE_GAME = "game/{campaignId}"
+private const val ROUTE_PRESENTATION = "presentation"
 
 class MainActivity : ComponentActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
@@ -75,7 +77,6 @@ class MainActivity : ComponentActivity() {
                 initialValue = UserAppSettings()
             )
             val coroutineScope = rememberCoroutineScope()
-            var showSettingsSheet by remember { mutableStateOf(false) }
 
             val isDark = when (appSettings.themeMode) {
                 PaperThemeMode.LIGHT -> false
@@ -100,34 +101,8 @@ class MainActivity : ComponentActivity() {
                 AppNavigation(
                     appSettings = appSettings,
                     themeRepo = themeRepo,
-                    onCycleTheme = cycleTheme,
-                    onOpenSettings = { showSettingsSheet = true }
+                    onCycleTheme = cycleTheme
                 )
-
-                if (showSettingsSheet) {
-                    SettingsBottomSheet(
-                        settings = appSettings,
-                        onSelectTheme = { mode ->
-                            coroutineScope.launch { themeRepo.setThemeMode(mode) }
-                        },
-                        onSelectFontStyle = { style ->
-                            coroutineScope.launch { themeRepo.setFontStyle(style) }
-                        },
-                        onSelectFontScale = { scale ->
-                            coroutineScope.launch { themeRepo.setFontScale(scale) }
-                        },
-                        onSelectAiModel = { model ->
-                            coroutineScope.launch { themeRepo.setAiModel(model) }
-                        },
-                        onToggleLiveStreaming = { enabled ->
-                            coroutineScope.launch { themeRepo.setLiveStreamingEnabled(enabled) }
-                        },
-                        onToggleHaptics = { enabled ->
-                            coroutineScope.launch { themeRepo.setHapticsEnabled(enabled) }
-                        },
-                        onDismiss = { showSettingsSheet = false }
-                    )
-                }
             }
         }
     }
@@ -137,8 +112,7 @@ class MainActivity : ComponentActivity() {
 fun AppNavigation(
     appSettings: UserAppSettings,
     themeRepo: ThemePreferencesRepository,
-    onCycleTheme: () -> Unit,
-    onOpenSettings: () -> Unit
+    onCycleTheme: () -> Unit
 ) {
     val context = LocalContext.current
     val activityContext = remember(context) { context.findActivity() ?: context }
@@ -189,7 +163,6 @@ fun AppNavigation(
                 appSettings = appSettings,
                 themeRepo = themeRepo,
                 onCycleTheme = onCycleTheme,
-                onOpenSettings = onOpenSettings,
                 onSignOut = {
                     signOutUser(
                         credentialManager = credentialManager,
@@ -208,11 +181,13 @@ private fun AuthenticatedNavHost(
     appSettings: UserAppSettings,
     themeRepo: ThemePreferencesRepository,
     onCycleTheme: () -> Unit,
-    onOpenSettings: () -> Unit,
     onSignOut: () -> Unit
 ) {
     val navController = rememberNavController()
     val appContext = LocalContext.current.applicationContext
+    val coroutineScope = rememberCoroutineScope()
+    var showSettingsSheet by remember { mutableStateOf(false) }
+
     val aiRepository = remember(appContext) {
         GameMasterAiRepository(
             debugTokenProvider = { getLocalAppCheckDebugToken(appContext) }
@@ -247,7 +222,12 @@ private fun AuthenticatedNavHost(
                 themeMode = appSettings.themeMode,
                 hapticsEnabled = appSettings.hapticsEnabled,
                 onCycleTheme = onCycleTheme,
-                onOpenSettings = onOpenSettings,
+                onOpenSettings = { showSettingsSheet = true },
+                onOpenPresentation = {
+                    navController.navigate(ROUTE_PRESENTATION) {
+                        launchSingleTop = true
+                    }
+                },
                 onSignOut = onSignOut,
                 onCreateNewCampaign = { templateId ->
                     val route = if (templateId.isNullOrBlank()) {
@@ -331,9 +311,47 @@ private fun AuthenticatedNavHost(
             GameSessionScreen(
                 viewModel = sessionVm,
                 hapticsEnabled = appSettings.hapticsEnabled,
-                onOpenSettings = onOpenSettings,
+                onOpenSettings = { showSettingsSheet = true },
                 onBack = { navController.popBackStack() }
             )
         }
+
+        composable(ROUTE_PRESENTATION) {
+            PresentationScreen(
+                hapticsEnabled = appSettings.hapticsEnabled,
+                onBack = { navController.popBackStack() }
+            )
+        }
+    }
+
+    if (showSettingsSheet) {
+        SettingsBottomSheet(
+            settings = appSettings,
+            onSelectTheme = { mode ->
+                coroutineScope.launch { themeRepo.setThemeMode(mode) }
+            },
+            onSelectFontStyle = { style ->
+                coroutineScope.launch { themeRepo.setFontStyle(style) }
+            },
+            onSelectFontScale = { scale ->
+                coroutineScope.launch { themeRepo.setFontScale(scale) }
+            },
+            onSelectAiModel = { model ->
+                coroutineScope.launch { themeRepo.setAiModel(model) }
+            },
+            onToggleLiveStreaming = { enabled ->
+                coroutineScope.launch { themeRepo.setLiveStreamingEnabled(enabled) }
+            },
+            onToggleHaptics = { enabled ->
+                coroutineScope.launch { themeRepo.setHapticsEnabled(enabled) }
+            },
+            onOpenPresentation = {
+                showSettingsSheet = false
+                navController.navigate(ROUTE_PRESENTATION) {
+                    launchSingleTop = true
+                }
+            },
+            onDismiss = { showSettingsSheet = false }
+        )
     }
 }
