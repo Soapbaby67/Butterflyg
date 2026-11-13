@@ -76,15 +76,23 @@ jobs:
 
       - name: Prepare debug keystore
         if: ${{ github.event.inputs.build_type != 'release' }}
+        env:
+          DEBUG_KEYSTORE_BASE64: ${{ secrets.DEBUG_KEYSTORE_BASE64 }}
         run: |
           if [ -f debug.keystore.base64 ]; then
+            echo "Using repository debug.keystore.base64"
             base64 -d debug.keystore.base64 > debug.keystore
+          elif [ -n "$DEBUG_KEYSTORE_BASE64" ]; then
+            echo "Restored debug.keystore from GitHub Secret DEBUG_KEYSTORE_BASE64"
+            printf '%s' "$DEBUG_KEYSTORE_BASE64" | base64 -d > debug.keystore
           else
+            echo "::warning::debug.keystore.base64 not found; generating a temporary debug keystore (Google Sign-In will fail unless this SHA-1 is registered in Firebase)."
             keytool -genkeypair -v -keystore debug.keystore \
               -storepass android -alias androiddebugkey -keypass android \
               -keyalg RSA -keysize 2048 -validity 10000 \
               -dname "CN=Android Debug,O=Android,C=US"
           fi
+          keytool -list -v -keystore debug.keystore -alias androiddebugkey -storepass android -keypass android | grep -E "SHA1:|SHA256:" || true
 
       - name: Build Debug APK
         if: ${{ github.event.inputs.build_type != 'release' }}

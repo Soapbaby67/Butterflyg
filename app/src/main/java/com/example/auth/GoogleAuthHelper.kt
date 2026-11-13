@@ -3,6 +3,8 @@ package com.example.auth
 import android.app.Activity
 import android.content.Context
 import android.content.ContextWrapper
+import android.content.pm.PackageManager
+import android.os.Build
 import android.util.Log
 import androidx.credentials.ClearCredentialStateRequest
 import androidx.credentials.CredentialManager
@@ -35,11 +37,34 @@ import kotlinx.coroutines.flow.callbackFlow
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.tasks.await
 import kotlinx.coroutines.withContext
+import java.security.MessageDigest
 
 tailrec fun Context.findActivity(): Activity? = when (this) {
     is Activity -> this
     is ContextWrapper -> baseContext.findActivity()
     else -> null
+}
+
+@Suppress("DEPRECATION")
+private fun getAppSigningSha1(context: Context): String? = try {
+    val pm = context.packageManager
+    val signatures = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.P) {
+        val info = pm.getPackageInfo(context.packageName, PackageManager.GET_SIGNING_CERTIFICATES)
+        info.signingInfo?.apkContentsSigners
+    } else {
+        val info = pm.getPackageInfo(context.packageName, PackageManager.GET_SIGNATURES)
+        info.signatures
+    }
+    val certBytes = signatures?.firstOrNull()?.toByteArray()
+    if (certBytes != null) {
+        MessageDigest.getInstance("SHA-1")
+            .digest(certBytes)
+            .joinToString(":") { "%02X".format(it) }
+    } else {
+        null
+    }
+} catch (_: Exception) {
+    null
 }
 
 internal fun FirebaseAuth.authStateFlow(): Flow<FirebaseUser?> = callbackFlow {
@@ -139,9 +164,15 @@ fun onGoogleSignInClicked(
         } catch (e: GetCredentialCancellationException) {
             val detail = e.errorMessage?.toString()?.takeIf { it.isNotBlank() }
                 ?: e.message?.takeIf { it.isNotBlank() }
-            Log.w("Auth", "Google Sign-In flow cancelled or dismissed: $detail", e)
+            val appSha1 = getAppSigningSha1(activityContext)
+            Log.w("Auth", "Google Sign-In flow cancelled or dismissed: $detail | SHA1=$appSha1", e)
             val userNotice = if (detail != null) {
-                "Вход через Google прерван ($detail). Если вы выбрали аккаунт, проверьте обновление Google Play Services и совпадение SHA-1 ключа подписи."
+                buildString {
+                    append("Вход через Google прерван ($detail).")
+                    if (appSha1 != null) {
+                        append("\nSHA-1 этого APK: $appSha1")
+                    }
+                }
             } else {
                 "Вход через Google был отменён."
             }
