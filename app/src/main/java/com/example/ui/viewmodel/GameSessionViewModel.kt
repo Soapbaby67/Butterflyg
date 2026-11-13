@@ -5,8 +5,13 @@ import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import com.example.data.model.Campaign
 import com.example.data.model.CampaignTurn
+import com.example.data.repository.AiModelChoice
 import com.example.data.repository.CampaignRepository
 import com.example.data.repository.GameMasterAiRepository
+import com.example.data.repository.PlayerFactNote
+import com.example.data.repository.PlayerFactsRepository
+import com.example.data.repository.ThemePreferencesRepository
+import com.example.data.repository.UserAppSettings
 import com.google.firebase.firestore.FirebaseFirestoreException
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.flow.MutableStateFlow
@@ -15,7 +20,9 @@ import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.catch
 import kotlinx.coroutines.flow.combine
+import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.flow.stateIn
+import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
 
 data class GameSessionData(
@@ -25,13 +32,19 @@ data class GameSessionData(
 
 sealed interface TurnSubmissionState {
     data object Idle : TurnSubmissionState
-    data class Generating(val pendingAction: String) : TurnSubmissionState
+    data class Generating(
+        val pendingAction: String,
+        val streamingNarrative: String = ""
+    ) : TurnSubmissionState
+
     data class Error(val message: String, val failedAction: String) : TurnSubmissionState
 }
 
 class GameSessionViewModel(
     private val campaignRepository: CampaignRepository,
     private val aiRepository: GameMasterAiRepository,
+    private val factsRepository: PlayerFactsRepository,
+    private val themePreferencesRepository: ThemePreferencesRepository,
     private val currentUserId: String,
     private val campaignId: String
 ) : ViewModel() {
@@ -59,6 +72,14 @@ class GameSessionViewModel(
         initialValue = UiState.Loading
     )
 
+    val facts: StateFlow<List<PlayerFactNote>> = factsRepository.observeFacts(campaignId)
+        .catch { emit(emptyList()) }
+        .stateIn(
+            scope = viewModelScope,
+            started = SharingStarted.WhileSubscribed(STOP_TIMEOUT_MILLIS),
+            initialValue = emptyList()
+        )
+
     private val _submissionState = MutableStateFlow<TurnSubmissionState>(TurnSubmissionState.Idle)
     val submissionState: StateFlow<TurnSubmissionState> = _submissionState.asStateFlow()
 
@@ -72,10 +93,30 @@ class GameSessionViewModel(
         viewModelScope.launch {
             _submissionState.value = TurnSubmissionState.Generating(action)
             try {
+                val appSettings = runCatching {
+                    themePreferencesRepository.settings.first()
+                }.getOrDefault(UserAppSettings())
+                val pinnedFacts = facts.value
+                    .filter { it.isPinned }
+                    .map { it.text }
+
                 val outcome = aiRepository.generateNextTurn(
                     campaign = currentData.campaign,
                     recentTurns = currentData.turns,
-                    playerAction = action
+                    playerAction = action,
+                    preferredModel = appSettings.aiModel,
+                    pinnedFacts = pinnedFacts,
+                    onStreamingNarrative = { partialNarrative ->
+                        if (appSettings.liveStreamingEnabled) {
+                            _submissionState.update { state ->
+                                if (state is TurnSubmissionState.Generating) {
+                                    state.copy(streamingNarrative = partialNarrative)
+                                } else {
+                                    state
+                                }
+                            }
+                        }
+                    }
                 )
                 campaignRepository.recordTurn(
                     campaign = currentData.campaign,
@@ -92,6 +133,24 @@ class GameSessionViewModel(
                     failedAction = action
                 )
             }
+        }
+    }
+
+    fun addFact(text: String) {
+        viewModelScope.launch {
+            factsRepository.addFact(campaignId, text)
+        }
+    }
+
+    fun toggleFactPinned(factId: String) {
+        viewModelScope.launch {
+            factsRepository.toggleFactPinned(campaignId, factId)
+        }
+    }
+
+    fun deleteFact(factId: String) {
+        viewModelScope.launch {
+            factsRepository.deleteFact(campaignId, factId)
         }
     }
 

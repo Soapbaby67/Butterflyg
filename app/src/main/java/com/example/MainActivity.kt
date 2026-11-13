@@ -34,10 +34,13 @@ import com.example.core.getLocalAppCheckDebugToken
 import com.example.data.repository.CampaignRepository
 import com.example.data.repository.GameMasterAiRepository
 import com.example.data.repository.PaperThemeMode
+import com.example.data.repository.PlayerFactsRepository
 import com.example.data.repository.ThemePreferencesRepository
+import com.example.data.repository.UserAppSettings
 import com.example.ui.screens.AuthScreen
 import com.example.ui.screens.CampaignsScreen
 import com.example.ui.screens.GameSessionScreen
+import com.example.ui.screens.SettingsBottomSheet
 import com.example.ui.screens.SetupWizardScreen
 import com.example.ui.theme.ChroniclesTheme
 import com.example.ui.viewmodel.CampaignsViewModel
@@ -68,19 +71,20 @@ class MainActivity : ComponentActivity() {
             val themeRepo = remember(context) {
                 ThemePreferencesRepository(context.applicationContext)
             }
-            val themeMode by themeRepo.themeMode.collectAsStateWithLifecycle(
-                initialValue = PaperThemeMode.SYSTEM
+            val appSettings by themeRepo.settings.collectAsStateWithLifecycle(
+                initialValue = UserAppSettings()
             )
             val coroutineScope = rememberCoroutineScope()
+            var showSettingsSheet by remember { mutableStateOf(false) }
 
-            val isDark = when (themeMode) {
+            val isDark = when (appSettings.themeMode) {
                 PaperThemeMode.LIGHT -> false
                 PaperThemeMode.DARK -> true
                 PaperThemeMode.SYSTEM -> isSystemInDarkTheme()
             }
 
             val cycleTheme: () -> Unit = {
-                val next = when (themeMode) {
+                val next = when (appSettings.themeMode) {
                     PaperThemeMode.SYSTEM -> PaperThemeMode.LIGHT
                     PaperThemeMode.LIGHT -> PaperThemeMode.DARK
                     PaperThemeMode.DARK -> PaperThemeMode.SYSTEM
@@ -88,11 +92,42 @@ class MainActivity : ComponentActivity() {
                 coroutineScope.launch { themeRepo.setThemeMode(next) }
             }
 
-            ChroniclesTheme(darkTheme = isDark) {
+            ChroniclesTheme(
+                darkTheme = isDark,
+                fontStyle = appSettings.fontStyle,
+                fontScale = appSettings.fontScale
+            ) {
                 AppNavigation(
-                    themeMode = themeMode,
-                    onCycleTheme = cycleTheme
+                    appSettings = appSettings,
+                    themeRepo = themeRepo,
+                    onCycleTheme = cycleTheme,
+                    onOpenSettings = { showSettingsSheet = true }
                 )
+
+                if (showSettingsSheet) {
+                    SettingsBottomSheet(
+                        settings = appSettings,
+                        onSelectTheme = { mode ->
+                            coroutineScope.launch { themeRepo.setThemeMode(mode) }
+                        },
+                        onSelectFontStyle = { style ->
+                            coroutineScope.launch { themeRepo.setFontStyle(style) }
+                        },
+                        onSelectFontScale = { scale ->
+                            coroutineScope.launch { themeRepo.setFontScale(scale) }
+                        },
+                        onSelectAiModel = { model ->
+                            coroutineScope.launch { themeRepo.setAiModel(model) }
+                        },
+                        onToggleLiveStreaming = { enabled ->
+                            coroutineScope.launch { themeRepo.setLiveStreamingEnabled(enabled) }
+                        },
+                        onToggleHaptics = { enabled ->
+                            coroutineScope.launch { themeRepo.setHapticsEnabled(enabled) }
+                        },
+                        onDismiss = { showSettingsSheet = false }
+                    )
+                }
             }
         }
     }
@@ -100,8 +135,10 @@ class MainActivity : ComponentActivity() {
 
 @Composable
 fun AppNavigation(
-    themeMode: PaperThemeMode,
-    onCycleTheme: () -> Unit
+    appSettings: UserAppSettings,
+    themeRepo: ThemePreferencesRepository,
+    onCycleTheme: () -> Unit,
+    onOpenSettings: () -> Unit
 ) {
     val context = LocalContext.current
     val activityContext = remember(context) { context.findActivity() ?: context }
@@ -136,7 +173,7 @@ fun AppNavigation(
     val user = currentUser
     if (user == null) {
         AuthScreen(
-            themeMode = themeMode,
+            themeMode = appSettings.themeMode,
             onCycleTheme = onCycleTheme,
             onAuthSuccess = { currentUser = Firebase.auth.currentUser },
             onBeforeInteractiveSignIn = {
@@ -149,8 +186,10 @@ fun AppNavigation(
             AuthenticatedNavHost(
                 currentUserId = user.uid,
                 userDisplayName = user.displayName ?: user.email.orEmpty(),
-                themeMode = themeMode,
+                appSettings = appSettings,
+                themeRepo = themeRepo,
                 onCycleTheme = onCycleTheme,
+                onOpenSettings = onOpenSettings,
                 onSignOut = {
                     signOutUser(
                         credentialManager = credentialManager,
@@ -166,8 +205,10 @@ fun AppNavigation(
 private fun AuthenticatedNavHost(
     currentUserId: String,
     userDisplayName: String,
-    themeMode: PaperThemeMode,
+    appSettings: UserAppSettings,
+    themeRepo: ThemePreferencesRepository,
     onCycleTheme: () -> Unit,
+    onOpenSettings: () -> Unit,
     onSignOut: () -> Unit
 ) {
     val navController = rememberNavController()
@@ -176,6 +217,9 @@ private fun AuthenticatedNavHost(
         GameMasterAiRepository(
             debugTokenProvider = { getLocalAppCheckDebugToken(appContext) }
         )
+    }
+    val factsRepository = remember(appContext) {
+        PlayerFactsRepository(appContext)
     }
 
     NavHost(
@@ -200,8 +244,10 @@ private fun AuthenticatedNavHost(
             CampaignsScreen(
                 viewModel = campaignsVm,
                 userDisplayName = userDisplayName,
-                themeMode = themeMode,
+                themeMode = appSettings.themeMode,
+                hapticsEnabled = appSettings.hapticsEnabled,
                 onCycleTheme = onCycleTheme,
+                onOpenSettings = onOpenSettings,
                 onSignOut = onSignOut,
                 onCreateNewCampaign = { templateId ->
                     val route = if (templateId.isNullOrBlank()) {
@@ -237,7 +283,8 @@ private fun AuthenticatedNavHost(
                         val db = FirebaseFirestore.getInstance(databaseId)
                         SetupWizardViewModel(
                             campaignRepository = CampaignRepository(db, Firebase.auth),
-                            aiRepository = aiRepository
+                            aiRepository = aiRepository,
+                            themePreferencesRepository = themeRepo
                         )
                     }
                 }
@@ -273,6 +320,8 @@ private fun AuthenticatedNavHost(
                         GameSessionViewModel(
                             campaignRepository = CampaignRepository(db, Firebase.auth),
                             aiRepository = aiRepository,
+                            factsRepository = factsRepository,
+                            themePreferencesRepository = themeRepo,
                             currentUserId = currentUserId,
                             campaignId = campaignId
                         )
@@ -281,8 +330,8 @@ private fun AuthenticatedNavHost(
             )
             GameSessionScreen(
                 viewModel = sessionVm,
-                themeMode = themeMode,
-                onCycleTheme = onCycleTheme,
+                hapticsEnabled = appSettings.hapticsEnabled,
+                onOpenSettings = onOpenSettings,
                 onBack = { navController.popBackStack() }
             )
         }

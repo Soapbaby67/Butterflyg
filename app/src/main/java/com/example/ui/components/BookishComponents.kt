@@ -25,7 +25,6 @@ import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.automirrored.outlined.MenuBook
 import androidx.compose.material.icons.outlined.AutoAwesome
 import androidx.compose.material.icons.outlined.Backpack
 import androidx.compose.material.icons.outlined.Bolt
@@ -34,14 +33,11 @@ import androidx.compose.material.icons.outlined.ExpandMore
 import androidx.compose.material.icons.outlined.Favorite
 import androidx.compose.material.icons.outlined.FavoriteBorder
 import androidx.compose.material.icons.outlined.Forum
-import androidx.compose.material.icons.outlined.Key
 import androidx.compose.material.icons.outlined.LightMode
 import androidx.compose.material.icons.outlined.Mood
 import androidx.compose.material.icons.outlined.MoodBad
 import androidx.compose.material.icons.outlined.Paid
 import androidx.compose.material.icons.outlined.Psychology
-import androidx.compose.material.icons.outlined.Science
-import androidx.compose.material.icons.outlined.Security
 import androidx.compose.material.icons.outlined.Spa
 import androidx.compose.material.icons.outlined.Tonality
 import androidx.compose.material.icons.outlined.Visibility
@@ -156,6 +152,7 @@ fun NpcEmotionCard(
     universe: String,
     palette: UniverseVisualPalette,
     npcRelation: NpcRelation? = null,
+    onClick: (() -> Unit)? = null,
     modifier: Modifier = Modifier
 ) {
     if (!npc.hasActiveNpc || npc.name.isBlank()) return
@@ -170,6 +167,15 @@ fun NpcEmotionCard(
         tonalElevation = 2.dp,
         modifier = modifier
             .fillMaxWidth()
+            .then(
+                if (onClick != null) {
+                    Modifier
+                        .clip(MaterialTheme.shapes.large)
+                        .clickable(onClick = onClick)
+                } else {
+                    Modifier
+                }
+            )
             .testTag("npc_emotion_card")
     ) {
         Column(
@@ -284,6 +290,24 @@ fun NpcEmotionCard(
                         color = trustColor
                     )
                 }
+
+                if (npcRelation.boundaries.isNotBlank()) {
+                    Text(
+                        text = "Границы: ${npcRelation.boundaries}",
+                        style = MaterialTheme.typography.labelSmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        maxLines = 2,
+                        overflow = TextOverflow.Ellipsis
+                    )
+                } else if (npcRelation.personality.isNotBlank()) {
+                    Text(
+                        text = "Характер: ${npcRelation.personality}",
+                        style = MaterialTheme.typography.labelSmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        maxLines = 2,
+                        overflow = TextOverflow.Ellipsis
+                    )
+                }
             }
         }
     }
@@ -295,6 +319,7 @@ fun HudStatusPanel(
     campaign: Campaign,
     stats: ParsedHudStats,
     palette: UniverseVisualPalette,
+    onItemClick: (String) -> Unit = {},
     modifier: Modifier = Modifier
 ) {
     var isExpanded by rememberSaveable(campaign.id) { mutableStateOf(false) }
@@ -522,10 +547,10 @@ fun HudStatusPanel(
                         )
                     }
 
-                    // Inventory Visual Chips
+                    // Inventory Visual Chips (interactive!)
                     Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
                         Text(
-                            text = "Снаряжение и предметы",
+                            text = "Снаряжение и предметы (нажмите для действия)",
                             style = MaterialTheme.typography.labelSmall,
                             color = MaterialTheme.colorScheme.onSurfaceVariant
                         )
@@ -544,15 +569,18 @@ fun HudStatusPanel(
                                     Surface(
                                         color = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.72f),
                                         shape = MaterialTheme.shapes.small,
-                                        border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant)
+                                        border = BorderStroke(1.dp, palette.accentPrimary.copy(alpha = 0.32f)),
+                                        modifier = Modifier
+                                            .clip(MaterialTheme.shapes.small)
+                                            .clickable { onItemClick(item) }
                                     ) {
                                         Row(
                                             verticalAlignment = Alignment.CenterVertically,
                                             horizontalArrangement = Arrangement.spacedBy(5.dp),
-                                            modifier = Modifier.padding(horizontal = 8.dp, vertical = 5.dp)
+                                            modifier = Modifier.padding(horizontal = 9.dp, vertical = 6.dp)
                                         ) {
                                             Icon(
-                                                imageVector = inventoryItemIcon(item),
+                                                imageVector = itemCategoryIcon(item),
                                                 contentDescription = null,
                                                 tint = palette.accentPrimary,
                                                 modifier = Modifier.size(13.dp)
@@ -615,21 +643,6 @@ fun HudStatusPanel(
                 }
             }
         }
-    }
-}
-
-private fun inventoryItemIcon(item: String): ImageVector {
-    val lower = item.lowercase()
-    return when {
-        lower.contains("клин") || lower.contains("стилет") || lower.contains("меч") ||
-            lower.contains("нож") || lower.contains("пистол") || lower.contains("брон") ||
-            lower.contains("щит") || lower.contains("палоч") -> Icons.Outlined.Security
-        lower.contains("алхим") || lower.contains("зель") || lower.contains("эликсир") ||
-            lower.contains("аптеч") || lower.contains("лекар") -> Icons.Outlined.Science
-        lower.contains("ключ") || lower.contains("пропуск") || lower.contains("печать") -> Icons.Outlined.Key
-        lower.contains("книг") || lower.contains("свиток") || lower.contains("карт") ||
-            lower.contains("запис") || lower.contains("дневник") -> Icons.AutoMirrored.Outlined.MenuBook
-        else -> Icons.Outlined.Backpack
     }
 }
 

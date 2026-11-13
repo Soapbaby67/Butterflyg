@@ -2,6 +2,7 @@ package com.example.ui.screens
 
 import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.Image
+import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
@@ -19,16 +20,20 @@ import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.LazyRow
 import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.outlined.Logout
 import androidx.compose.material.icons.filled.Add
 import androidx.compose.material.icons.outlined.AutoStories
 import androidx.compose.material.icons.outlined.DeleteOutline
 import androidx.compose.material.icons.outlined.Explore
+import androidx.compose.material.icons.outlined.FavoriteBorder
+import androidx.compose.material.icons.outlined.Settings
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.ExtendedFloatingActionButton
+import androidx.compose.material3.FilterChip
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
@@ -48,21 +53,31 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.graphics.Brush
+import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.res.stringResource
+import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.example.R
+import com.example.core.rememberRpgHaptics
 import com.example.data.model.Campaign
+import com.example.data.model.ScenarioGenre
 import com.example.data.model.UniversePresets
 import com.example.data.model.UniverseTemplate
 import com.example.data.repository.PaperThemeMode
 import com.example.ui.components.EmotionBadgeChip
+import com.example.ui.components.HudStatsParser
+import com.example.ui.components.NpcPortraitAvatar
 import com.example.ui.components.PaperThemeToggleButton
+import com.example.ui.theme.WeatherMood
+import com.example.ui.theme.rememberUniverseVisualPalette
+import com.example.ui.theme.resolveSceneBackdropRes
 import com.example.ui.viewmodel.CampaignsViewModel
 import com.example.ui.viewmodel.UiState
 
@@ -72,7 +87,9 @@ fun CampaignsScreen(
     viewModel: CampaignsViewModel,
     userDisplayName: String,
     themeMode: PaperThemeMode,
+    hapticsEnabled: Boolean,
     onCycleTheme: () -> Unit,
+    onOpenSettings: () -> Unit,
     onSignOut: () -> Unit,
     onCreateNewCampaign: (templateId: String?) -> Unit,
     onOpenCampaign: (campaignId: String) -> Unit
@@ -80,6 +97,16 @@ fun CampaignsScreen(
     val campaignsState by viewModel.campaignsState.collectAsStateWithLifecycle()
     val deleteError by viewModel.deleteError.collectAsStateWithLifecycle()
     var campaignToDelete by remember { mutableStateOf<Campaign?>(null) }
+    var selectedGenre by remember { mutableStateOf(ScenarioGenre.ALL) }
+    val haptics = rememberRpgHaptics(hapticsEnabled)
+
+    val filteredTemplates = remember(selectedGenre) {
+        if (selectedGenre == ScenarioGenre.ALL) {
+            UniversePresets.templates
+        } else {
+            UniversePresets.templates.filter { it.genre == selectedGenre }
+        }
+    }
 
     Scaffold(
         containerColor = MaterialTheme.colorScheme.background,
@@ -109,8 +136,25 @@ fun CampaignsScreen(
                 actions = {
                     PaperThemeToggleButton(
                         themeMode = themeMode,
-                        onCycleTheme = onCycleTheme
+                        onCycleTheme = {
+                            haptics.tap()
+                            onCycleTheme()
+                        }
                     )
+                    IconButton(
+                        onClick = {
+                            haptics.tap()
+                            onOpenSettings()
+                        },
+                        modifier = Modifier
+                            .minimumInteractiveComponentSize()
+                            .testTag("shelf_settings_button")
+                    ) {
+                        Icon(
+                            imageVector = Icons.Outlined.Settings,
+                            contentDescription = "Настройки чтения и ИИ"
+                        )
+                    }
                     IconButton(
                         onClick = onSignOut,
                         modifier = Modifier
@@ -127,7 +171,10 @@ fun CampaignsScreen(
         },
         floatingActionButton = {
             ExtendedFloatingActionButton(
-                onClick = { onCreateNewCampaign(null) },
+                onClick = {
+                    haptics.tap()
+                    onCreateNewCampaign(null)
+                },
                 containerColor = MaterialTheme.colorScheme.primary,
                 contentColor = MaterialTheme.colorScheme.onPrimary,
                 icon = {
@@ -187,23 +234,42 @@ fun CampaignsScreen(
                     }
                 }
 
-                // Quick-start universe presets
+                // Quick-start universe presets with genre filter + visual world covers
                 item {
                     Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
                         Text(
-                            text = "Быстрый старт вселенных",
+                            text = "Сценарии и вселенные",
                             style = MaterialTheme.typography.titleMedium,
                             color = MaterialTheme.colorScheme.onBackground,
                             modifier = Modifier.padding(horizontal = 16.dp)
                         )
                         LazyRow(
                             contentPadding = PaddingValues(horizontal = 16.dp),
+                            horizontalArrangement = Arrangement.spacedBy(8.dp)
+                        ) {
+                            items(ScenarioGenre.entries, key = { it.name }) { genre ->
+                                FilterChip(
+                                    selected = selectedGenre == genre,
+                                    onClick = {
+                                        haptics.tap()
+                                        selectedGenre = genre
+                                    },
+                                    label = { Text(genre.labelRu) },
+                                    modifier = Modifier.testTag("genre_filter_${genre.name.lowercase()}")
+                                )
+                            }
+                        }
+                        LazyRow(
+                            contentPadding = PaddingValues(horizontal = 16.dp),
                             horizontalArrangement = Arrangement.spacedBy(12.dp)
                         ) {
-                            items(UniversePresets.templates, key = { it.id }) { template ->
+                            items(filteredTemplates, key = { it.id }) { template ->
                                 UniverseTemplateCard(
                                     template = template,
-                                    onClick = { onCreateNewCampaign(template.id) }
+                                    onClick = {
+                                        haptics.tap()
+                                        onCreateNewCampaign(template.id)
+                                    }
                                 )
                             }
                         }
@@ -264,7 +330,10 @@ fun CampaignsScreen(
                         if (state.data.isEmpty()) {
                             item {
                                 EmptyShelfCard(
-                                    onStartCustom = { onCreateNewCampaign(null) },
+                                    onStartCustom = {
+                                        haptics.tap()
+                                        onCreateNewCampaign(null)
+                                    },
                                     modifier = Modifier.padding(horizontal = 16.dp)
                                 )
                             }
@@ -272,7 +341,10 @@ fun CampaignsScreen(
                             items(state.data, key = { it.id }) { campaign ->
                                 CampaignSlotCard(
                                     campaign = campaign,
-                                    onOpen = { onOpenCampaign(campaign.id) },
+                                    onOpen = {
+                                        haptics.tap()
+                                        onOpenCampaign(campaign.id)
+                                    },
                                     onRequestDelete = { campaignToDelete = campaign },
                                     modifier = Modifier.padding(horizontal = 16.dp)
                                 )
@@ -324,46 +396,87 @@ private fun UniverseTemplateCard(
     template: UniverseTemplate,
     onClick: () -> Unit
 ) {
+    val palette = rememberUniverseVisualPalette(template.universe)
+    val coverRes = remember(template.id) {
+        resolveSceneBackdropRes(
+            universe = template.universe,
+            location = template.startingPoint,
+            weatherMood = WeatherMood.DAY
+        )
+    }
+
     Surface(
         color = MaterialTheme.colorScheme.surface,
         shape = MaterialTheme.shapes.medium,
-        border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant),
+        border = BorderStroke(1.dp, palette.accentPrimary.copy(alpha = 0.30f)),
         tonalElevation = 1.dp,
         modifier = Modifier
-            .width(220.dp)
+            .width(232.dp)
             .clip(MaterialTheme.shapes.medium)
             .clickable(onClick = onClick)
             .testTag("template_card_${template.id}")
     ) {
-        Column(
-            modifier = Modifier.padding(14.dp),
-            verticalArrangement = Arrangement.spacedBy(6.dp)
-        ) {
-            Surface(
-                color = MaterialTheme.colorScheme.secondaryContainer,
-                contentColor = MaterialTheme.colorScheme.onSecondaryContainer,
-                shape = MaterialTheme.shapes.small
+        Column {
+            Box(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .height(92.dp)
+            ) {
+                Image(
+                    painter = painterResource(id = coverRes),
+                    contentDescription = template.title,
+                    contentScale = ContentScale.Crop,
+                    modifier = Modifier.fillMaxSize()
+                )
+                Box(
+                    modifier = Modifier
+                        .fillMaxSize()
+                        .background(
+                            Brush.verticalGradient(
+                                colors = listOf(
+                                    Color.Black.copy(alpha = 0.16f),
+                                    palette.atmosphericTint.copy(alpha = 0.78f)
+                                )
+                            )
+                        )
+                )
+                Surface(
+                    color = Color.Black.copy(alpha = 0.56f),
+                    contentColor = Color(0xFFF6EFE4),
+                    shape = RoundedCornerShape(999.dp),
+                    border = BorderStroke(1.dp, palette.accentPrimary.copy(alpha = 0.45f)),
+                    modifier = Modifier
+                        .align(Alignment.TopStart)
+                        .padding(8.dp)
+                ) {
+                    Text(
+                        text = template.badge,
+                        style = MaterialTheme.typography.labelSmall,
+                        modifier = Modifier.padding(horizontal = 8.dp, vertical = 3.dp)
+                    )
+                }
+            }
+
+            Column(
+                modifier = Modifier.padding(12.dp),
+                verticalArrangement = Arrangement.spacedBy(4.dp)
             ) {
                 Text(
-                    text = template.badge,
-                    style = MaterialTheme.typography.labelSmall,
-                    modifier = Modifier.padding(horizontal = 8.dp, vertical = 3.dp)
+                    text = template.title,
+                    style = MaterialTheme.typography.titleMedium,
+                    fontWeight = FontWeight.SemiBold,
+                    color = MaterialTheme.colorScheme.onSurface,
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis
+                )
+                Text(
+                    text = template.subtitle,
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    maxLines = 2,
+                    overflow = TextOverflow.Ellipsis
                 )
             }
-            Text(
-                text = template.title,
-                style = MaterialTheme.typography.titleLarge,
-                color = MaterialTheme.colorScheme.onSurface,
-                maxLines = 1,
-                overflow = TextOverflow.Ellipsis
-            )
-            Text(
-                text = template.subtitle,
-                style = MaterialTheme.typography.bodySmall,
-                color = MaterialTheme.colorScheme.onSurfaceVariant,
-                maxLines = 2,
-                overflow = TextOverflow.Ellipsis
-            )
         }
     }
 }
@@ -375,10 +488,29 @@ private fun CampaignSlotCard(
     onRequestDelete: () -> Unit,
     modifier: Modifier = Modifier
 ) {
+    val palette = rememberUniverseVisualPalette(campaign.universe)
+    val parsedStats = remember(
+        campaign.hudStatusAndInventory,
+        campaign.hudRelationsAndCanon,
+        campaign.hudTime,
+        campaign.hudLocation,
+        campaign.inventory,
+        campaign.universe
+    ) {
+        HudStatsParser.parse(campaign)
+    }
+    val coverRes = remember(campaign.id, campaign.universe, campaign.hudLocation, parsedStats.weatherMood) {
+        resolveSceneBackdropRes(
+            universe = campaign.universe,
+            location = campaign.hudLocation,
+            weatherMood = parsedStats.weatherMood
+        )
+    }
+
     Surface(
         color = MaterialTheme.colorScheme.surface,
         shape = MaterialTheme.shapes.large,
-        border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant),
+        border = BorderStroke(1.dp, palette.accentPrimary.copy(alpha = 0.30f)),
         tonalElevation = 1.dp,
         modifier = modifier
             .fillMaxWidth()
@@ -386,98 +518,175 @@ private fun CampaignSlotCard(
             .clickable(onClick = onOpen)
             .testTag("campaign_card_${campaign.id}")
     ) {
-        Column(
-            modifier = Modifier.padding(16.dp),
-            verticalArrangement = Arrangement.spacedBy(10.dp)
-        ) {
-            Row(
-                verticalAlignment = Alignment.Top,
-                horizontalArrangement = Arrangement.SpaceBetween,
-                modifier = Modifier.fillMaxWidth()
+        Column {
+            // World Cover Strip
+            Box(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .height(88.dp)
             ) {
-                Column(modifier = Modifier.weight(1f)) {
+                Image(
+                    painter = painterResource(id = coverRes),
+                    contentDescription = campaign.title,
+                    contentScale = ContentScale.Crop,
+                    modifier = Modifier.fillMaxSize()
+                )
+                Box(
+                    modifier = Modifier
+                        .fillMaxSize()
+                        .background(
+                            Brush.verticalGradient(
+                                colors = listOf(
+                                    palette.bannerScrimTop,
+                                    palette.bannerScrimBottom
+                                )
+                            )
+                        )
+                )
+
+                Row(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .align(Alignment.TopEnd)
+                        .padding(horizontal = 10.dp, vertical = 6.dp),
+                    horizontalArrangement = Arrangement.SpaceBetween,
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    Surface(
+                        color = Color.Black.copy(alpha = 0.56f),
+                        shape = RoundedCornerShape(999.dp),
+                        border = BorderStroke(1.dp, palette.accentPrimary.copy(alpha = 0.45f))
+                    ) {
+                        Text(
+                            text = "Ход ${campaign.turnCount}",
+                            style = MaterialTheme.typography.labelSmall,
+                            color = Color(0xFFF6EFE4),
+                            modifier = Modifier.padding(horizontal = 9.dp, vertical = 4.dp)
+                        )
+                    }
+
+                    IconButton(
+                        onClick = onRequestDelete,
+                        modifier = Modifier
+                            .minimumInteractiveComponentSize()
+                            .testTag("delete_campaign_${campaign.id}")
+                    ) {
+                        Icon(
+                            imageVector = Icons.Outlined.DeleteOutline,
+                            contentDescription = "Удалить хронику",
+                            tint = Color(0xFFF6EFE4)
+                        )
+                    }
+                }
+
+                Column(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .align(Alignment.BottomStart)
+                        .padding(horizontal = 14.dp, vertical = 8.dp)
+                ) {
                     Text(
                         text = campaign.title,
                         style = MaterialTheme.typography.titleLarge,
-                        color = MaterialTheme.colorScheme.onSurface,
+                        color = Color(0xFFFFFBF4),
                         maxLines = 1,
                         overflow = TextOverflow.Ellipsis
                     )
                     Text(
                         text = campaign.universe,
                         style = MaterialTheme.typography.bodySmall,
-                        color = MaterialTheme.colorScheme.primary,
+                        color = Color(0xFFE7DFD1),
                         maxLines = 1,
                         overflow = TextOverflow.Ellipsis
                     )
                 }
-                IconButton(
-                    onClick = onRequestDelete,
-                    modifier = Modifier
-                        .minimumInteractiveComponentSize()
-                        .testTag("delete_campaign_${campaign.id}")
-                ) {
-                    Icon(
-                        imageVector = Icons.Outlined.DeleteOutline,
-                        contentDescription = "Удалить хронику",
-                        tint = MaterialTheme.colorScheme.onSurfaceVariant
-                    )
-                }
             }
 
-            Row(
-                verticalAlignment = Alignment.CenterVertically,
-                horizontalArrangement = Arrangement.spacedBy(8.dp)
+            Column(
+                modifier = Modifier.padding(horizontal = 14.dp, vertical = 12.dp),
+                verticalArrangement = Arrangement.spacedBy(8.dp)
             ) {
-                Surface(
-                    color = MaterialTheme.colorScheme.surfaceVariant,
-                    shape = MaterialTheme.shapes.small
-                ) {
-                    Text(
-                        text = "Ход ${campaign.turnCount}",
-                        style = MaterialTheme.typography.labelMedium,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant,
-                        modifier = Modifier.padding(horizontal = 8.dp, vertical = 4.dp)
-                    )
-                }
-                Surface(
-                    color = MaterialTheme.colorScheme.secondaryContainer,
-                    shape = MaterialTheme.shapes.small
-                ) {
-                    Text(
-                        text = "Канон: ${campaign.canonDeviationPercent}%",
-                        style = MaterialTheme.typography.labelMedium,
-                        color = MaterialTheme.colorScheme.onSecondaryContainer,
-                        modifier = Modifier.padding(horizontal = 8.dp, vertical = 4.dp)
-                    )
-                }
-                if (campaign.activeNpc.hasActiveNpc && campaign.activeNpc.name.isNotBlank()) {
-                    EmotionBadgeChip(
-                        emotionLabel = "${campaign.activeNpc.name}: ${campaign.activeNpc.emotionLabel}",
-                        emotionCategory = campaign.activeNpc.emotionCategory,
-                        modifier = Modifier.weight(1f, fill = false)
-                    )
-                }
-            }
-
-            if (campaign.hudLocation.isNotBlank()) {
                 Row(
                     verticalAlignment = Alignment.CenterVertically,
-                    horizontalArrangement = Arrangement.spacedBy(6.dp)
+                    horizontalArrangement = Arrangement.spacedBy(8.dp),
+                    modifier = Modifier.fillMaxWidth()
                 ) {
-                    Icon(
-                        imageVector = Icons.Outlined.Explore,
-                        contentDescription = null,
-                        tint = MaterialTheme.colorScheme.onSurfaceVariant,
-                        modifier = Modifier.size(15.dp)
-                    )
-                    Text(
-                        text = "${campaign.hudLocation} • ${campaign.hudTime}",
-                        style = MaterialTheme.typography.bodySmall,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant,
-                        maxLines = 1,
-                        overflow = TextOverflow.Ellipsis
-                    )
+                    if (campaign.activeNpc.hasActiveNpc && campaign.activeNpc.name.isNotBlank()) {
+                        val npcRel = campaign.npcs.firstOrNull {
+                            it.name.equals(campaign.activeNpc.name, ignoreCase = true)
+                        }
+                        NpcPortraitAvatar(
+                            name = campaign.activeNpc.name,
+                            role = npcRel?.role.orEmpty(),
+                            universe = campaign.universe,
+                            explicitArchetype = npcRel?.archetype.orEmpty(),
+                            emotionCategory = campaign.activeNpc.emotionCategory,
+                            intensity = campaign.activeNpc.intensity,
+                            palette = palette,
+                            size = 34.dp
+                        )
+                        EmotionBadgeChip(
+                            emotionLabel = "${campaign.activeNpc.name}: ${campaign.activeNpc.emotionLabel}",
+                            emotionCategory = campaign.activeNpc.emotionCategory,
+                            modifier = Modifier.weight(1f, fill = false)
+                        )
+                    }
+
+                    Surface(
+                        color = MaterialTheme.colorScheme.surfaceVariant,
+                        shape = RoundedCornerShape(999.dp)
+                    ) {
+                        Row(
+                            verticalAlignment = Alignment.CenterVertically,
+                            horizontalArrangement = Arrangement.spacedBy(4.dp),
+                            modifier = Modifier.padding(horizontal = 8.dp, vertical = 4.dp)
+                        ) {
+                            Icon(
+                                imageVector = Icons.Outlined.FavoriteBorder,
+                                contentDescription = "Здоровье",
+                                tint = palette.healthHigh,
+                                modifier = Modifier.size(13.dp)
+                            )
+                            Text(
+                                text = "${parsedStats.healthPercent}%",
+                                style = MaterialTheme.typography.labelSmall,
+                                color = MaterialTheme.colorScheme.onSurface
+                            )
+                        }
+                    }
+
+                    Surface(
+                        color = palette.accentSecondary.copy(alpha = 0.14f),
+                        shape = RoundedCornerShape(999.dp)
+                    ) {
+                        Text(
+                            text = "Канон: ${campaign.canonDeviationPercent}%",
+                            style = MaterialTheme.typography.labelSmall,
+                            color = palette.accentSecondary,
+                            modifier = Modifier.padding(horizontal = 8.dp, vertical = 4.dp)
+                        )
+                    }
+                }
+
+                if (campaign.hudLocation.isNotBlank()) {
+                    Row(
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.spacedBy(6.dp)
+                    ) {
+                        Icon(
+                            imageVector = Icons.Outlined.Explore,
+                            contentDescription = null,
+                            tint = palette.accentPrimary,
+                            modifier = Modifier.size(15.dp)
+                        )
+                        Text(
+                            text = "${campaign.hudLocation} • ${campaign.hudTime}",
+                            style = MaterialTheme.typography.bodySmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                            maxLines = 1,
+                            overflow = TextOverflow.Ellipsis
+                        )
+                    }
                 }
             }
         }

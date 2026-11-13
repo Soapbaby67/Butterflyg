@@ -6,12 +6,15 @@ import androidx.lifecycle.viewModelScope
 import com.example.data.model.SessionSetupInput
 import com.example.data.model.UniversePresets
 import com.example.data.model.UniverseTemplate
+import com.example.data.repository.AiModelChoice
 import com.example.data.repository.CampaignRepository
 import com.example.data.repository.GameMasterAiRepository
+import com.example.data.repository.ThemePreferencesRepository
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
+import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
 
@@ -36,7 +39,8 @@ data class SetupWizardUiState(
 
 class SetupWizardViewModel(
     private val campaignRepository: CampaignRepository,
-    private val aiRepository: GameMasterAiRepository
+    private val aiRepository: GameMasterAiRepository,
+    private val themePreferencesRepository: ThemePreferencesRepository? = null
 ) : ViewModel() {
 
     private val _uiState = MutableStateFlow(SetupWizardUiState())
@@ -132,7 +136,14 @@ class SetupWizardViewModel(
         viewModelScope.launch {
             _uiState.update { it.copy(isGenerating = true, errorMessage = null) }
             try {
-                val openingOutcome = aiRepository.generateOpeningScene(setupInput)
+                val preferredModel = runCatching {
+                    themePreferencesRepository?.settings?.first()?.aiModel
+                }.getOrNull() ?: AiModelChoice.FLASH_LITE
+
+                val openingOutcome = aiRepository.generateOpeningScene(
+                    setup = setupInput,
+                    preferredModel = preferredModel
+                )
                 val campaignId = campaignRepository.createCampaignWithOpeningTurn(
                     setup = setupInput,
                     openingOutcome = openingOutcome

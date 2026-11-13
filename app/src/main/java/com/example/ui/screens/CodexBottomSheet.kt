@@ -1,6 +1,7 @@
 package com.example.ui.screens
 
 import androidx.compose.foundation.BorderStroke
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.ExperimentalLayoutApi
@@ -12,34 +13,54 @@ import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.navigationBarsPadding
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.foundation.text.KeyboardActions
+import androidx.compose.foundation.text.KeyboardOptions
+import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.Add
+import androidx.compose.material.icons.filled.PushPin
+import androidx.compose.material.icons.outlined.DeleteOutline
+import androidx.compose.material.icons.outlined.PushPin
 import androidx.compose.material3.ExperimentalMaterial3Api
+import androidx.compose.material3.FilledIconButton
 import androidx.compose.material3.HorizontalDivider
+import androidx.compose.material3.Icon
+import androidx.compose.material3.IconButton
+import androidx.compose.material3.IconButtonDefaults
 import androidx.compose.material3.LinearProgressIndicator
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.ModalBottomSheet
+import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.PrimaryTabRow
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Tab
 import androidx.compose.material3.Text
+import androidx.compose.material3.minimumInteractiveComponentSize
 import androidx.compose.material3.rememberModalBottomSheetState
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableIntStateOf
+import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.input.ImeAction
+import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import com.example.data.model.ButterflyEvent
 import com.example.data.model.Campaign
 import com.example.data.model.NpcRelation
+import com.example.data.repository.PlayerFactNote
 import com.example.ui.components.EmotionBadgeChip
 import com.example.ui.components.NpcPortraitAvatar
+import com.example.ui.components.itemCategoryIcon
 import com.example.ui.theme.UniverseVisualPalette
 import com.example.ui.theme.rememberUniverseVisualPalette
 
@@ -47,11 +68,24 @@ import com.example.ui.theme.rememberUniverseVisualPalette
 @Composable
 fun CodexBottomSheet(
     campaign: Campaign,
+    facts: List<PlayerFactNote> = emptyList(),
+    initialTabIndex: Int = 0,
+    onAddFact: (String) -> Unit = {},
+    onToggleFactPinned: (String) -> Unit = {},
+    onDeleteFact: (String) -> Unit = {},
+    onItemClick: (String) -> Unit = {},
     onDismiss: () -> Unit
 ) {
     val sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true)
-    var selectedTab by remember { mutableIntStateOf(0) }
-    val tabs = listOf("Персонаж", "Отношения (${campaign.npcs.size})", "Эффект бабочки")
+    var selectedTab by remember(initialTabIndex) {
+        mutableIntStateOf(initialTabIndex.coerceIn(0, 3))
+    }
+    val tabs = listOf(
+        "Герой",
+        "NPC (${campaign.npcs.size})",
+        "Бабочка",
+        "Факты (${facts.size})"
+    )
     val universePalette = rememberUniverseVisualPalette(campaign.universe)
 
     ModalBottomSheet(
@@ -91,7 +125,8 @@ fun CodexBottomSheet(
                             Text(
                                 text = title,
                                 style = MaterialTheme.typography.labelLarge,
-                                maxLines = 1
+                                maxLines = 1,
+                                overflow = TextOverflow.Ellipsis
                             )
                         }
                     )
@@ -99,13 +134,24 @@ fun CodexBottomSheet(
             }
 
             when (selectedTab) {
-                0 -> CharacterAndInventoryTab(campaign)
+                0 -> CharacterAndInventoryTab(
+                    campaign = campaign,
+                    palette = universePalette,
+                    onItemClick = onItemClick
+                )
                 1 -> NpcRelationsTab(
                     npcs = campaign.npcs,
                     universe = campaign.universe,
                     palette = universePalette
                 )
                 2 -> ButterflyTimelineTab(campaign)
+                3 -> PlayerFactsTab(
+                    facts = facts,
+                    palette = universePalette,
+                    onAddFact = onAddFact,
+                    onTogglePinned = onToggleFactPinned,
+                    onDeleteFact = onDeleteFact
+                )
             }
         }
     }
@@ -113,7 +159,11 @@ fun CodexBottomSheet(
 
 @OptIn(ExperimentalLayoutApi::class)
 @Composable
-private fun CharacterAndInventoryTab(campaign: Campaign) {
+private fun CharacterAndInventoryTab(
+    campaign: Campaign,
+    palette: UniverseVisualPalette,
+    onItemClick: (String) -> Unit
+) {
     LazyColumn(
         contentPadding = PaddingValues(20.dp),
         verticalArrangement = Arrangement.spacedBy(14.dp),
@@ -131,7 +181,7 @@ private fun CharacterAndInventoryTab(campaign: Campaign) {
         item {
             Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
                 Text(
-                    text = "Инвентарь",
+                    text = "Инвентарь (нажмите для действия)",
                     style = MaterialTheme.typography.titleMedium,
                     color = MaterialTheme.colorScheme.onSurface
                 )
@@ -150,14 +200,199 @@ private fun CharacterAndInventoryTab(campaign: Campaign) {
                             Surface(
                                 color = MaterialTheme.colorScheme.surfaceVariant,
                                 shape = MaterialTheme.shapes.small,
-                                border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant)
+                                border = BorderStroke(1.dp, palette.accentPrimary.copy(alpha = 0.35f)),
+                                modifier = Modifier
+                                    .clip(MaterialTheme.shapes.small)
+                                    .clickable { onItemClick(itemName) }
                             ) {
-                                Text(
-                                    text = itemName,
-                                    style = MaterialTheme.typography.bodyMedium,
-                                    modifier = Modifier.padding(horizontal = 10.dp, vertical = 6.dp)
-                                )
+                                Row(
+                                    verticalAlignment = Alignment.CenterVertically,
+                                    horizontalArrangement = Arrangement.spacedBy(6.dp),
+                                    modifier = Modifier.padding(horizontal = 10.dp, vertical = 7.dp)
+                                ) {
+                                    Icon(
+                                        imageVector = itemCategoryIcon(itemName),
+                                        contentDescription = null,
+                                        tint = palette.accentPrimary,
+                                        modifier = Modifier.size(15.dp)
+                                    )
+                                    Text(
+                                        text = itemName,
+                                        style = MaterialTheme.typography.bodyMedium
+                                    )
+                                }
                             }
+                        }
+                    }
+                }
+            }
+        }
+    }
+}
+
+@Composable
+private fun PlayerFactsTab(
+    facts: List<PlayerFactNote>,
+    palette: UniverseVisualPalette,
+    onAddFact: (String) -> Unit,
+    onTogglePinned: (String) -> Unit,
+    onDeleteFact: (String) -> Unit
+) {
+    var draftFact by remember { mutableStateOf("") }
+
+    LazyColumn(
+        contentPadding = PaddingValues(20.dp),
+        verticalArrangement = Arrangement.spacedBy(12.dp),
+        modifier = Modifier.fillMaxWidth()
+    ) {
+        item {
+            Surface(
+                color = palette.accentPrimary.copy(alpha = 0.10f),
+                shape = MaterialTheme.shapes.medium,
+                border = BorderStroke(1.dp, palette.accentPrimary.copy(alpha = 0.30f)),
+                modifier = Modifier.fillMaxWidth()
+            ) {
+                Text(
+                    text = "Закреплённые факты автоматически передаются ИИ-мастеру на каждом ходе — удобно для обещаний, тайн, бюджета или деталей внешности.",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurface,
+                    modifier = Modifier.padding(12.dp)
+                )
+            }
+        }
+
+        item {
+            Row(
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.spacedBy(8.dp),
+                modifier = Modifier.fillMaxWidth()
+            ) {
+                OutlinedTextField(
+                    value = draftFact,
+                    onValueChange = { draftFact = it },
+                    placeholder = { Text("Например: Обещал принести зонт завтра") },
+                    singleLine = true,
+                    keyboardOptions = KeyboardOptions(imeAction = ImeAction.Done),
+                    keyboardActions = KeyboardActions(
+                        onDone = {
+                            if (draftFact.isNotBlank()) {
+                                onAddFact(draftFact)
+                                draftFact = ""
+                            }
+                        }
+                    ),
+                    modifier = Modifier
+                        .weight(1f)
+                        .testTag("fact_input")
+                )
+                FilledIconButton(
+                    onClick = {
+                        if (draftFact.isNotBlank()) {
+                            onAddFact(draftFact)
+                            draftFact = ""
+                        }
+                    },
+                    enabled = draftFact.isNotBlank(),
+                    colors = IconButtonDefaults.filledIconButtonColors(
+                        containerColor = palette.accentPrimary,
+                        contentColor = MaterialTheme.colorScheme.onPrimary
+                    ),
+                    modifier = Modifier
+                        .size(48.dp)
+                        .testTag("add_fact_button")
+                ) {
+                    Icon(
+                        imageVector = Icons.Default.Add,
+                        contentDescription = "Добавить факт"
+                    )
+                }
+            }
+        }
+
+        if (facts.isEmpty()) {
+            item {
+                Text(
+                    text = "Заметок пока нет. Добавьте первый факт, чтобы мастер помнил важную деталь.",
+                    style = MaterialTheme.typography.bodyMedium,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    modifier = Modifier.padding(vertical = 8.dp)
+                )
+            }
+        } else {
+            items(facts, key = { it.id }) { fact ->
+                Surface(
+                    color = if (fact.isPinned) {
+                        MaterialTheme.colorScheme.background
+                    } else {
+                        MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.45f)
+                    },
+                    shape = MaterialTheme.shapes.medium,
+                    border = BorderStroke(
+                        width = 1.dp,
+                        color = if (fact.isPinned) {
+                            palette.accentPrimary.copy(alpha = 0.42f)
+                        } else {
+                            MaterialTheme.colorScheme.outlineVariant
+                        }
+                    ),
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .testTag("fact_card_${fact.id}")
+                ) {
+                    Row(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .padding(start = 12.dp, end = 6.dp, top = 8.dp, bottom = 8.dp),
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.spacedBy(8.dp)
+                    ) {
+                        IconButton(
+                            onClick = { onTogglePinned(fact.id) },
+                            modifier = Modifier.minimumInteractiveComponentSize()
+                        ) {
+                            Icon(
+                                imageVector = if (fact.isPinned) {
+                                    Icons.Filled.PushPin
+                                } else {
+                                    Icons.Outlined.PushPin
+                                },
+                                contentDescription = if (fact.isPinned) {
+                                    "Открепить из контекста ИИ"
+                                } else {
+                                    "Закрепить для ИИ"
+                                },
+                                tint = if (fact.isPinned) {
+                                    palette.accentPrimary
+                                } else {
+                                    MaterialTheme.colorScheme.onSurfaceVariant
+                                }
+                            )
+                        }
+                        Column(modifier = Modifier.weight(1f)) {
+                            Text(
+                                text = fact.text,
+                                style = MaterialTheme.typography.bodyMedium,
+                                color = MaterialTheme.colorScheme.onSurface
+                            )
+                            Text(
+                                text = if (fact.isPinned) "В контексте ИИ" else "Только для себя",
+                                style = MaterialTheme.typography.labelSmall,
+                                color = if (fact.isPinned) {
+                                    palette.accentPrimary
+                                } else {
+                                    MaterialTheme.colorScheme.onSurfaceVariant
+                                }
+                            )
+                        }
+                        IconButton(
+                            onClick = { onDeleteFact(fact.id) },
+                            modifier = Modifier.minimumInteractiveComponentSize()
+                        ) {
+                            Icon(
+                                imageVector = Icons.Outlined.DeleteOutline,
+                                contentDescription = "Удалить заметку",
+                                tint = MaterialTheme.colorScheme.onSurfaceVariant
+                            )
                         }
                     }
                 }
@@ -269,6 +504,21 @@ private fun NpcRelationsTab(
                         Text(
                             text = if (npc.trustLevel > 0) "+${npc.trustLevel}" else "${npc.trustLevel}",
                             style = MaterialTheme.typography.labelSmall
+                        )
+                    }
+
+                    if (npc.personality.isNotBlank()) {
+                        Text(
+                            text = "Характер: ${npc.personality}",
+                            style = MaterialTheme.typography.bodySmall,
+                            color = MaterialTheme.colorScheme.onSurface
+                        )
+                    }
+                    if (npc.boundaries.isNotBlank()) {
+                        Text(
+                            text = "Личные границы: ${npc.boundaries}",
+                            style = MaterialTheme.typography.bodySmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant
                         )
                     }
                 }

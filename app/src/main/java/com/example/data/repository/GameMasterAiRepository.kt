@@ -22,11 +22,260 @@ import kotlinx.coroutines.TimeoutCancellationException
 import kotlinx.coroutines.withTimeout
 import org.json.JSONObject
 
+class StreamingNarrativeExtractor {
+    private enum class State {
+        SCAN,
+        IN_KEY,
+        KEY_ESCAPE,
+        AFTER_KEY_EXPECT_COLON,
+        AFTER_COLON_EXPECT_VALUE,
+        IN_NARRATIVE,
+        NARRATIVE_ESCAPE,
+        NARRATIVE_UNICODE,
+        IN_OTHER_STRING,
+        OTHER_ESCAPE,
+        DONE
+    }
+
+    private var state = State.SCAN
+    private var braceDepth = 0
+    private var expectObjectKeyAtDepth1 = false
+    private val keyBuffer = StringBuilder()
+    private val unicodeBuffer = StringBuilder(4)
+    private val narrativeBuffer = StringBuilder()
+    private var targetIsNarrative = false
+
+    fun append(chunk: String): String? {
+        if (chunk.isEmpty() || state == State.DONE) return null
+        val prevLen = narrativeBuffer.length
+
+        for (ch in chunk) {
+            if (state == State.DONE) break
+            when (state) {
+                State.SCAN -> {
+                    when (ch) {
+                        '{' -> {
+                            braceDepth++
+                            expectObjectKeyAtDepth1 = (braceDepth == 1)
+                        }
+                        '}' -> {
+                            if (braceDepth > 0) braceDepth--
+                            expectObjectKeyAtDepth1 = (braceDepth == 1)
+                        }
+                        ',' -> {
+                            if (braceDepth == 1) {
+                                expectObjectKeyAtDepth1 = true
+                            }
+                        }
+                        '"' -> {
+                            if (braceDepth == 1 && expectObjectKeyAtDepth1) {
+                                keyBuffer.clear()
+                                state = State.IN_KEY
+                            } else {
+                                state = State.IN_OTHER_STRING
+                            }
+                        }
+                    }
+                }
+
+                State.IN_KEY -> {
+                    when (ch) {
+                        '\\' -> state = State.KEY_ESCAPE
+                        '"' -> {
+                            targetIsNarrative = (keyBuffer.toString() == "narrative")
+                            state = State.AFTER_KEY_EXPECT_COLON
+                        }
+                        else -> keyBuffer.append(ch)
+                    }
+                }
+
+                State.KEY_ESCAPE -> {
+                    keyBuffer.append(ch)
+                    state = State.IN_KEY
+                }
+
+                State.AFTER_KEY_EXPECT_COLON -> {
+                    when {
+                        ch.isWhitespace() -> Unit
+                        ch == ':' -> state = State.AFTER_COLON_EXPECT_VALUE
+                        else -> {
+                            targetIsNarrative = false
+                            expectObjectKeyAtDepth1 = false
+                            state = State.SCAN
+                        }
+                    }
+                }
+
+                State.AFTER_COLON_EXPECT_VALUE -> {
+                    when {
+                        ch.isWhitespace() -> Unit
+                        ch == '"' -> {
+                            state = if (targetIsNarrative) {
+                                State.IN_NARRATIVE
+                            } else {
+                                State.IN_OTHER_STRING
+                            }
+                        }
+                        ch == '{' -> {
+                            braceDepth++
+                            expectObjectKeyAtDepth1 = false
+                            targetIsNarrative = false
+                            state = State.SCAN
+                        }
+                        else -> {
+                            expectObjectKeyAtDepth1 = false
+                            targetIsNarrative = false
+                            state = State.SCAN
+                        }
+                    }
+                }
+
+                State.IN_NARRATIVE -> {
+                    when (ch) {
+                        '\\' -> state = State.NARRATIVE_ESCAPE
+                        '"' -> state = State.DONE
+                        else -> narrativeBuffer.append(ch)
+                    }
+                }
+
+                State.NARRATIVE_ESCAPE -> {
+                    when (ch) {
+                        'n' -> {
+                            narrativeBuffer.append('\n')
+                            state = State.IN_NARRATIVE
+                        }
+                        'r' -> state = State.IN_NARRATIVE
+                        't' -> {
+                            narrativeBuffer.append("    ")
+                            state = State.IN_NARRATIVE
+                        }
+                        '"', '\\', '/' -> {
+                            narrativeBuffer.append(ch)
+                            state = State.IN_NARRATIVE
+                        }
+                        'u' -> {
+                            unicodeBuffer.clear()
+                            state = State.NARRATIVE_UNICODE
+                        }
+                        else -> {
+                            narrativeBuffer.append(ch)
+                            state = State.IN_NARRATIVE
+                        }
+                    }
+                }
+
+                State.NARRATIVE_UNICODE -> {
+                    unicodeBuffer.append(ch)
+                    if (unicodeBuffer.length == 4) {
+                        val code = unicodeBuffer.toString().toIntOrNull(16)
+                        if (code != null) {
+                            narrativeBuffer.append(code.toChar())
+                        }
+                        state = State.IN_NARRATIVE
+                    }
+                }
+
+                State.IN_OTHER_STRING -> {
+                    when (ch) {
+                        '\\' -> state = State.OTHER_ESCAPE
+                        '"' -> {
+                            if (braceDepth == 1) expectObjectKeyAtDepth1 = false
+                            state = State.SCAN
+                        }
+                    }
+                }
+
+                State.OTHER_ESCAPE -> {
+                    state = State.IN_OTHER_STRING
+                }
+
+                State.DONE -> break
+            }
+        }
+
+        return if (narrativeBuffer.length > prevLen) {
+            narrativeBuffer.toString()
+        } else {
+            null
+        }
+    }
+
+    fun currentNarrative(): String = narrativeBuffer.toString()
+}
+
+object NpcTrustGuardrail {
+    private const val MAX_TRUST_GAIN_PER_TURN = 12L
+    private const val MAX_TRUST_LOSS_PER_TURN = 35L
+    private const val MAX_STRANGER_INITIAL_TRUST = 25L
+    private const val ROMANTIC_TRUST_THRESHOLD = 45L
+
+    private val preExistingCloseKeywords = listOf(
+        "брат", "сестр", "мать", "мама", "отец", "папа",
+        "муж", "жена", "супруг", "давн", "лучший друг", "лучшая подруг"
+    )
+
+    private val prematureRomanceLabels = listOf(
+        "влюб", "любов", "без ума", "обожа", "парень", "девушка", "невеста", "жених"
+    )
+
+    fun apply(
+        incoming: NpcRelation,
+        previous: NpcRelation?
+    ): NpcRelation {
+        val clampedTrust = if (previous != null) {
+            val minAllowed = (previous.trustLevel - MAX_TRUST_LOSS_PER_TURN).coerceAtLeast(-100L)
+            val maxAllowed = (previous.trustLevel + MAX_TRUST_GAIN_PER_TURN).coerceAtMost(100L)
+            incoming.trustLevel.coerceIn(minAllowed, maxAllowed)
+        } else {
+            val combinedRole = "${incoming.role.lowercase()} ${incoming.statusLabel.lowercase()}"
+            val isPreExistingClose = preExistingCloseKeywords.any { combinedRole.contains(it) }
+            if (isPreExistingClose) {
+                incoming.trustLevel.coerceIn(-100L, 100L)
+            } else {
+                incoming.trustLevel.coerceIn(-100L, MAX_STRANGER_INITIAL_TRUST)
+            }
+        }
+
+        val resolvedRole = incoming.role.ifBlank { previous?.role.orEmpty() }
+        val resolvedArchetype = incoming.archetype.ifBlank { previous?.archetype.orEmpty() }
+        val resolvedPersonality = incoming.personality.ifBlank { previous?.personality.orEmpty() }
+        val resolvedBoundaries = incoming.boundaries.ifBlank { previous?.boundaries.orEmpty() }
+
+        val rawStatus = incoming.statusLabel.ifBlank { previous?.statusLabel.orEmpty() }
+        val lowerStatus = rawStatus.lowercase()
+        val resolvedStatus = if (
+            clampedTrust < ROMANTIC_TRUST_THRESHOLD &&
+            prematureRomanceLabels.any { lowerStatus.contains(it) }
+        ) {
+            if (previous != null && previous.statusLabel.isNotBlank() &&
+                prematureRomanceLabels.none { previous.statusLabel.lowercase().contains(it) }
+            ) {
+                previous.statusLabel
+            } else if (clampedTrust >= 15L) {
+                "Осторожный интерес"
+            } else {
+                "Держит дистанцию"
+            }
+        } else {
+            rawStatus
+        }
+
+        return incoming.copy(
+            role = resolvedRole,
+            trustLevel = clampedTrust,
+            statusLabel = resolvedStatus,
+            archetype = resolvedArchetype,
+            personality = resolvedPersonality,
+            boundaries = resolvedBoundaries
+        )
+    }
+}
+
 class GameMasterAiRepository(
     private val debugTokenProvider: () -> String? = { null }
 ) {
     @Volatile
-    private var primaryCooldownUntilMs: Long = 0L
+    private var flash38CooldownUntilMs: Long = 0L
 
     private val emotionCategories = listOf(
         "joy",
@@ -74,23 +323,23 @@ class GameMasterAiRepository(
                 values = weatherMoods,
                 description = "Визуальное настроение/погода сцены для фона"
             ),
-            "healthPercent" to Schema.integer(description = "Здоровье героя в процентах от 0 до 100"),
-            "healthStatus" to Schema.string(description = "Краткое состояние героя (2-3 слова), например: В норме, Ранен, Утомлён"),
-            "currencyLabel" to Schema.string(description = "Текущие деньги или ресурс (например: 15 крон, 300 эдди) или пустая строка"),
+            "healthPercent" to Schema.integer(description = "Здоровье или ресурс сил героя в процентах от 0 до 100"),
+            "healthStatus" to Schema.string(description = "Краткое состояние героя (2-3 слова), например: В норме, Ранен, Утомлён, Влюблён"),
+            "currencyLabel" to Schema.string(description = "Текущие деньги или ресурс (например: 15 крон, 300 эдди, 2400 ₽) или пустая строка"),
             "hudStatusAndInventory" to Schema.string(description = "Краткое состояние персонажа для HUD"),
             "hudRelationsAndCanon" to Schema.string(description = "Краткий статус отношений и влияния на канон для HUD"),
-            "canonDeviationPercent" to Schema.integer(description = "Оценка отклонения от канона от 0 до 100"),
+            "canonDeviationPercent" to Schema.integer(description = "Оценка отклонения от канона/привычного уклада от 0 до 100"),
             "activeNpc" to Schema.obj(
                 properties = mapOf(
                     "hasActiveNpc" to Schema.boolean(description = "true, если игрок сейчас общается или напрямую взаимодействует с NPC"),
                     "name" to Schema.string(description = "Имя NPC или пустая строка, если рядом никого нет"),
-                    "emotionLabel" to Schema.string(description = "Точная эмоция NPC на русском, например: Смущение, Злость, Радость, Подозрение"),
+                    "emotionLabel" to Schema.string(description = "Точная эмоция NPC на русском, например: Смущение, Теплота, Злость, Радость, Подозрение"),
                     "emotionCategory" to Schema.enumeration(
                         values = emotionCategories,
                         description = "Категория эмоции NPC"
                     ),
                     "intensity" to Schema.integer(description = "Интенсивность эмоции от 1 до 5"),
-                    "note" to Schema.string(description = "Краткая ремарка о мимике, тоне голоса или поведении NPC")
+                    "note" to Schema.string(description = "Краткая ремарка о мимике, взгляде, жестах или тоне голоса NPC")
                 )
             ),
             "activeNpcArchetype" to Schema.enumeration(
@@ -106,16 +355,18 @@ class GameMasterAiRepository(
                     properties = mapOf(
                         "name" to Schema.string(),
                         "role" to Schema.string(),
-                        "trustLevel" to Schema.integer(description = "От -100 до 100"),
+                        "trustLevel" to Schema.integer(description = "От -100 до 100. Меняется плавно: +2..+10 за искренний удачный шаг, при навязчивости или нарушении границ падает."),
                         "statusLabel" to Schema.string(),
                         "lastEmotion" to Schema.string(),
                         "lastEmotionCategory" to Schema.enumeration(values = emotionCategories),
-                        "archetype" to Schema.enumeration(values = npcArchetypes)
+                        "archetype" to Schema.enumeration(values = npcArchetypes),
+                        "personality" to Schema.string(description = "Короткий психологический портрет: характер, гордость, комплексы или скрытый мотив (до 120 символов)"),
+                        "boundaries" to Schema.string(description = "Личные границы и красные линии NPC: на чём он отказывает, отстраняется или злится (до 120 символов)")
                     )
                 ),
-                description = "Актуальный список ключевых встреченных NPC и их отношений с игроком"
+                description = "Актуальный список ключевых встреченных NPC, их характеров, личных границ и отношений с игроком"
             ),
-            "hasButterflyEvent" to Schema.boolean(description = "true, если на этом ходе произошло значимое изменение канона или важный поворот"),
+            "hasButterflyEvent" to Schema.boolean(description = "true, если на этом ходе произошло значимое изменение канона или поворот отношений/судьбы"),
             "butterflyEventTitle" to Schema.string(description = "Короткий заголовок события эффекта бабочки (или пустая строка)"),
             "butterflyEventConsequence" to Schema.string(description = "Описание долгосрочного последствия для сюжета"),
             "butterflyEventImpact" to Schema.enumeration(values = listOf("minor", "major", "critical")),
@@ -124,7 +375,7 @@ class GameMasterAiRepository(
                 items = Schema.obj(
                     properties = mapOf(
                         "id" to Schema.string(),
-                        "approach" to Schema.string(description = "Подход: Силовой, Дипломатический, Скрытный или Нестандартный"),
+                        "approach" to Schema.string(description = "Подход под жанр сцены: Силовой, Дипломатический, Скрытный, Нестандартный, Романтический, Заботливый, Бытовой, Эмоциональный или Дерзкий"),
                         "text" to Schema.string(description = "Краткое описание действия игрока на русском языке")
                     )
                 ),
@@ -137,23 +388,42 @@ class GameMasterAiRepository(
     private val systemPrompt = content {
         text(
             """
-            Ты — опытный гейм-мастер и интерактивный рассказчик текстовых ролевых игр (RPG) с открытым миром и эффектом бабочки. Твоя задача — вести глубокий, нелинейный сюжет в выбранной игроком вселенной на русском языке, строго соблюдая её лор, законы, атмосферу и психологию персонажей.
+            Ты — опытный гейм-мастер и интерактивный рассказчик текстовых ролевых игр (RPG) в любых жанрах: от мрачного фэнтези и сай-фая до романтических историй, служебных драм и уютной повседневной рутины (Slice of Life). Твоя задача — вести глубокий, нелинейный сюжет в выбранной игроком вселенной на русском языке, строго соблюдая её лор, законы, атмосферу и психологию персонажей.
 
             СТРОГИЕ ПРАВИЛА ИГРЫ:
             1. Никакого контроля над игроком (Anti-Godmodding): описывай только мир, окружение, действия и реплики NPC, а также последствия поступков игрока. НИКОГДА не описывай мысли, чувства, слова или будущие действия за игрока. Останавливай повествование ровно в момент, когда требуется решение игрока.
-            2. Канон и эффект бабочки: изначально мир и персонажи строго соответствуют канону (их характерам, мотивациям, силам и знаниям). Однако любое вмешательство игрока способно необратимо изменить сюжет. Персонажи реагируют реалистично, исходя из их личности, а не подыгрывают.
-            3. Реальные последствия и отсутствие сюжетной брони: ошибки, слабая подготовка, неверные слова или безрассудство приводят к провалам, травмам, потере союзников или гибели.
-            4. Динамика и темп: пиши ярко, литературно, кинематографично, но без «воды». 2–4 выразительных абзаца в каждом ходе.
-            5. Эмоции NPC: при любом контакте с персонажем обязательно заполняй activeNpc (hasActiveNpc = true), указывая его точную эмоцию (например: Смущение, Злость, Счастье, Подозрение, Страх, Удивление, Холодное спокойствие), интенсивность (1–5) и краткое наблюдение за мимикой/интонацией.
-            6. Варианты действий: всегда предлагай 3–4 принципиально разных варианта (например: Силовой, Дипломатический, Скрытный, Нестандартный), сформулированных от лица выбора игрока, не дублирующих друг друга.
-            7. Язык: весь ответ исключительно на русском языке (кроме перечислений enum, требуемых схемой).
+            2. ПСИХОЛОГИЯ, СОПРОТИВЛЕНИЕ И ЛИЧНЫЕ ГРАНИЦЫ NPC (КРИТИЧЕСКИ ВАЖНО):
+               - Запрещено мгновенное угождение: в романтике и повседневности NPC НЕ влюбляются, НЕ краснеют от первого же комплимента и НЕ соглашаются на просьбы с 1–3 сообщения. У каждого персонажа есть свои дела, смена, усталость, гордость, скепсис, комплексы и личные заботы.
+               - Жёсткие личные границы и право на отказ: если игрок форсирует сближение, давит, льстит слишком очевидно, нарушает личное пространство, просит об одолжении без доверия или хамит — NPC обязан отказать, отшутиться с дистанцией, перевести тему, поставить границу или раздражённо отстраниться, снизив trustLevel.
+               - Медленный слоубёрн: незнакомец стартует с trustLevel около -10..+15. Один удачный разговор даёт +2..+8, не больше. Настоящая симпатия и доверие зарабатываются постепенно через множество сцен, поступков и преодоление трений характеров.
+               - Обязательно задавай каждому важному NPC поля "personality" и "boundaries" в JSON при знакомстве и строго придерживайся их дальше.
+            3. Жанр и реализм: строго придерживайся выбранного тона. В боевом или мрачном сеттинге — нет сюжетной брони, ошибки ведут к травмам. В романтике и повседневной рутине — не выдумывай искусственные катастрофы на пустом месте; делай ставку на живые диалоги, бытовые детали, бюджет, неловкие паузы и конфликт интересов.
+            4. Эффект бабочки: любое вмешательство или слово игрока способно необратимо изменить сюжет или отношения. Персонажи помнят прошлые промахи и удачи.
+            5. Динамика и темп: пиши ярко, литературно, живо, но без «воды». 2–4 выразительных абзаца в каждом ходе. В JSON-ответе ВСЕГДА первым полем выдавай "narrative", чтобы игрок сразу видел живой текст.
+            6. Эмоции NPC: при любом контакте с персонажем обязательно заполняй activeNpc (hasActiveNpc = true), указывая его точную эмоцию (например: Скепсис, Раздражение, Сдержанная улыбка, Смущение, Усталость, Подозрение, Теплота), интенсивность (1–5) и краткое наблюдение за мимикой/взглядом/интонацией.
+            7. Предметы и контекст: если игрок использует или показывает предмет из инвентаря, обязательно учитывай этот предмет в сцене и при необходимости обновляй инвентарь. Обязательно учитывай блок «ЗАКРЕПЛЁННЫЕ ФАКТЫ ИГРОКА», если он передан.
+            8. Варианты действий: всегда предлагай 3–4 принципиально разных варианта с подходящими к жанру тегами подхода (Силовой, Дипломатический, Скрытный, Нестандартный, Романтический, Заботливый, Бытовой, Эмоциональный, Дерзкий).
+            9. Язык: весь ответ исключительно на русском языке (кроме перечислений enum, требуемых схемой).
             """.trimIndent()
         )
     }
 
-    private val primaryModel by lazy {
+    private val flashLiteModel by lazy {
         Firebase.ai.generativeModel(
-            modelName = "gemini-3.8-flash",
+            modelName = AiModelChoice.FLASH_LITE.modelId,
+            generationConfig = generationConfig {
+                responseMimeType = "application/json"
+                responseSchema = turnResponseSchema
+                temperature = 0.85f
+                maxOutputTokens = 4096
+            },
+            systemInstruction = systemPrompt
+        )
+    }
+
+    private val flash38Model by lazy {
+        Firebase.ai.generativeModel(
+            modelName = AiModelChoice.FLASH_38.modelId,
             generationConfig = generationConfig {
                 responseMimeType = "application/json"
                 responseSchema = turnResponseSchema
@@ -167,20 +437,10 @@ class GameMasterAiRepository(
         )
     }
 
-    private val fastFallbackModel by lazy {
-        Firebase.ai.generativeModel(
-            modelName = "gemini-3.5-flash-lite",
-            generationConfig = generationConfig {
-                responseMimeType = "application/json"
-                responseSchema = turnResponseSchema
-                temperature = 0.85f
-                maxOutputTokens = 4096
-            },
-            systemInstruction = systemPrompt
-        )
-    }
-
-    suspend fun generateOpeningScene(setup: SessionSetupInput): GmTurnOutcome {
+    suspend fun generateOpeningScene(
+        setup: SessionSetupInput,
+        preferredModel: AiModelChoice = AiModelChoice.FLASH_LITE
+    ): GmTurnOutcome {
         val prompt = """
             НАЧАЛО НОВОЙ ХРОНИКИ.
             Игрок ответил на 4 стартовых вопроса:
@@ -192,13 +452,22 @@ class GameMasterAiRepository(
             Сгенерируй захватывающую стартовую сцену, установи стартовый HUD, инвентарь, начальное состояние NPC (если рядом есть персонаж в точке старта — обязательно передай его эмоцию в activeNpc) и дай первые 3–4 принципиально разных варианта действий. Останови сцену в момент, требующий первого решения игрока.
         """.trimIndent()
 
-        return invokeModel(prompt, defaultTurnNumber = 1L)
+        return invokeModel(
+            prompt = prompt,
+            defaultTurnNumber = 1L,
+            previousNpcs = emptyList(),
+            preferredModel = preferredModel,
+            onStreamingNarrative = {}
+        )
     }
 
     suspend fun generateNextTurn(
         campaign: Campaign,
         recentTurns: List<CampaignTurn>,
-        playerAction: String
+        playerAction: String,
+        preferredModel: AiModelChoice = AiModelChoice.FLASH_LITE,
+        pinnedFacts: List<String> = emptyList(),
+        onStreamingNarrative: (String) -> Unit = {}
     ): GmTurnOutcome {
         val historyBlock = recentTurns.takeLast(4).joinToString("\n\n") { turn ->
             buildString {
@@ -215,7 +484,15 @@ class GameMasterAiRepository(
             "Пока не зафиксированы."
         } else {
             campaign.npcs.joinToString("\n") { npc ->
-                "- ${npc.name} (${npc.role}): статус «${npc.statusLabel}», доверие ${npc.trustLevel}, последняя эмоция: ${npc.lastEmotion}"
+                buildString {
+                    append("- ${npc.name} (${npc.role}): статус «${npc.statusLabel}», доверие ${npc.trustLevel}, эмоция: ${npc.lastEmotion}")
+                    if (npc.personality.isNotBlank()) {
+                        append(" | Характер: ${npc.personality}")
+                    }
+                    if (npc.boundaries.isNotBlank()) {
+                        append(" | Границы: ${npc.boundaries}")
+                    }
+                }
             }
         }
 
@@ -224,6 +501,18 @@ class GameMasterAiRepository(
         } else {
             campaign.butterflyEvents.takeLast(10).joinToString("\n") { ev ->
                 "- Ход ${ev.turnNumber} [${ev.impactLevel}]: ${ev.title} — ${ev.consequence}"
+            }
+        }
+
+        val factsSection = if (pinnedFacts.isEmpty()) {
+            ""
+        } else {
+            buildString {
+                appendLine()
+                appendLine("ЗАКРЕПЛЁННЫЕ ФАКТЫ ИГРОКА (ОБЯЗАТЕЛЬНО УЧИТЫВАЙ В СЦЕНЕ):")
+                pinnedFacts.take(15).forEach { fact ->
+                    appendLine("- $fact")
+                }
             }
         }
 
@@ -237,8 +526,9 @@ class GameMasterAiRepository(
             - Отклонение от канона сейчас: ${campaign.canonDeviationPercent}%
             - Текущий инвентарь: ${campaign.inventory.joinToString(", ").ifBlank { "Пусто" }}
             - Резюме сюжета: ${campaign.storySummary.ifBlank { "Начало истории." }}
+            $factsSection
 
-            ИЗВЕСТНЫЕ NPC И ОТНОШЕНИЯ:
+            ИЗВЕСТНЫЕ NPC, ИХ ХАРАКТЕРЫ И ЛИЧНЫЕ ГРАНИЦЫ:
             $npcsBlock
 
             ЭФФЕКТ БАБОЧКИ (КЛЮЧЕВЫЕ ПОВОРОТЫ):
@@ -250,33 +540,48 @@ class GameMasterAiRepository(
             НОВОЕ ДЕЙСТВИЕ ИГРОКА:
             "$playerAction"
 
-            Оцени логичность, подготовку и контекст действия игрока. Опиши реакцию мира и NPC (строго без контроля над игроком!). Обнови HUD, эмоции активного NPC, инвентарь, отношения, процент отклонения от канона и предложи 3–4 новых разных выбора.
+            ПРОВЕРКА ГРАНИЦ: не позволяй NPC мгновенно соглашаться или влюбляться без веских оснований. Если игрок торопит события, давит или нарушает границы персонажа, NPC должен отказать, поставить условие или отстраниться.
+            Оцени логичность, подготовку и контекст действия игрока. Опиши реакцию мира и NPC (строго без контроля над игроком!). Обнови HUD, эмоции активного NPC, инвентарь, отношения (trustLevel меняй плавно), процент отклонения от канона и предложи 3–4 новых разных выбора.
         """.trimIndent()
 
-        return invokeModel(prompt, defaultTurnNumber = campaign.turnCount + 1L)
+        return invokeModel(
+            prompt = prompt,
+            defaultTurnNumber = campaign.turnCount + 1L,
+            previousNpcs = campaign.npcs,
+            preferredModel = preferredModel,
+            onStreamingNarrative = onStreamingNarrative
+        )
     }
 
-    private suspend fun invokeModel(prompt: String, defaultTurnNumber: Long): GmTurnOutcome {
+    private suspend fun invokeModel(
+        prompt: String,
+        defaultTurnNumber: Long,
+        previousNpcs: List<NpcRelation>,
+        preferredModel: AiModelChoice,
+        onStreamingNarrative: (String) -> Unit
+    ): GmTurnOutcome {
         try {
             val now = System.currentTimeMillis()
-            val useFastOnly = now < primaryCooldownUntilMs
+            val shouldUseFlash38 = preferredModel == AiModelChoice.FLASH_38 && now >= flash38CooldownUntilMs
 
-            val jsonString = if (useFastOnly) {
-                streamModelJson(fastFallbackModel, prompt, FALLBACK_TIMEOUT_MS)
+            val jsonString = if (!shouldUseFlash38) {
+                streamModelJson(flashLiteModel, prompt, FLASH_LITE_TIMEOUT_MS, onStreamingNarrative)
             } else {
                 try {
-                    streamModelJson(primaryModel, prompt, PRIMARY_TIMEOUT_MS)
+                    streamModelJson(flash38Model, prompt, FLASH_38_TIMEOUT_MS, onStreamingNarrative)
                 } catch (timeout: TimeoutCancellationException) {
-                    Log.w(TAG, "Primary model gemini-3.8-flash timed out; switching to gemini-3.5-flash-lite", timeout)
-                    primaryCooldownUntilMs = System.currentTimeMillis() + COOLDOWN_MS
-                    streamModelJson(fastFallbackModel, prompt, FALLBACK_TIMEOUT_MS)
+                    Log.w(TAG, "gemini-3.8-flash timed out; switching to gemini-3.5-flash-lite", timeout)
+                    flash38CooldownUntilMs = System.currentTimeMillis() + COOLDOWN_MS
+                    onStreamingNarrative("")
+                    streamModelJson(flashLiteModel, prompt, FLASH_LITE_TIMEOUT_MS, onStreamingNarrative)
                 } catch (e: CancellationException) {
                     throw e
                 } catch (e: Exception) {
                     if (isQuotaOrRateLimitError(e)) {
-                        Log.w(TAG, "Primary model hit quota/rate-limit; switching to gemini-3.5-flash-lite", e)
-                        primaryCooldownUntilMs = System.currentTimeMillis() + COOLDOWN_MS
-                        streamModelJson(fastFallbackModel, prompt, FALLBACK_TIMEOUT_MS)
+                        Log.w(TAG, "gemini-3.8-flash hit quota/rate-limit; switching to gemini-3.5-flash-lite", e)
+                        flash38CooldownUntilMs = System.currentTimeMillis() + COOLDOWN_MS
+                        onStreamingNarrative("")
+                        streamModelJson(flashLiteModel, prompt, FLASH_LITE_TIMEOUT_MS, onStreamingNarrative)
                     } else {
                         throw e
                     }
@@ -286,7 +591,7 @@ class GameMasterAiRepository(
             if (jsonString.isBlank()) {
                 throw IllegalStateException("ИИ-мастер вернул пустой ответ. Попробуйте повторить ход.")
             }
-            return parseTurnOutcome(jsonString, defaultTurnNumber)
+            return parseTurnOutcome(jsonString, defaultTurnNumber, previousNpcs)
         } catch (e: TimeoutCancellationException) {
             Log.e(TAG, "Firebase AI generation timed out", e)
             throw IllegalStateException("ИИ-мастер слишком долго обдумывал сцену. Проверьте интернет и попробуйте ещё раз.", e)
@@ -339,16 +644,26 @@ class GameMasterAiRepository(
     private suspend fun streamModelJson(
         targetModel: GenerativeModel,
         prompt: String,
-        timeoutMs: Long
+        timeoutMs: Long,
+        onStreamingNarrative: (String) -> Unit
     ): String = withTimeout(timeoutMs) {
         val builder = StringBuilder()
+        val extractor = StreamingNarrativeExtractor()
         targetModel.generateContentStream(prompt).collect { chunk ->
-            chunk.text?.let { builder.append(it) }
+            val chunkText = chunk.text ?: return@collect
+            builder.append(chunkText)
+            extractor.append(chunkText)?.let { partialNarrative ->
+                onStreamingNarrative(partialNarrative)
+            }
         }
         builder.toString().trim()
     }
 
-    private fun parseTurnOutcome(jsonString: String, turnNumber: Long): GmTurnOutcome {
+    private fun parseTurnOutcome(
+        jsonString: String,
+        turnNumber: Long,
+        previousNpcs: List<NpcRelation> = emptyList()
+    ): GmTurnOutcome {
         val root = JSONObject(jsonString)
 
         val narrative = root.optString("narrative").trim()
@@ -389,39 +704,49 @@ class GameMasterAiRepository(
                     val obj = npcsArray.optJSONObject(i) ?: continue
                     val name = obj.optString("name").trim()
                     if (name.isBlank()) continue
+                    val prev = previousNpcs.firstOrNull { it.name.equals(name, ignoreCase = true) }
                     val cat = EmotionCategory.fromKey(obj.optString("lastEmotionCategory", "neutral"))
                     val parsedArchetype = obj.optString("archetype").trim().lowercase()
                         .ifBlank {
                             if (name.equals(activeNpc.name, ignoreCase = true)) activeNpcArchetype else ""
                         }
-                    add(
-                        NpcRelation(
-                            name = name,
-                            role = obj.optString("role").trim(),
-                            trustLevel = obj.optLong("trustLevel", 0L).coerceIn(-100L, 100L),
-                            statusLabel = obj.optString("statusLabel").trim(),
-                            lastEmotion = obj.optString("lastEmotion").trim().ifBlank { cat.russianDefault },
-                            lastEmotionCategory = cat.key,
-                            archetype = parsedArchetype
-                        )
+                    val rawRelation = NpcRelation(
+                        name = name,
+                        role = obj.optString("role").trim(),
+                        trustLevel = obj.optLong("trustLevel", 0L).coerceIn(-100L, 100L),
+                        statusLabel = obj.optString("statusLabel").trim(),
+                        lastEmotion = obj.optString("lastEmotion").trim().ifBlank { cat.russianDefault },
+                        lastEmotionCategory = cat.key,
+                        archetype = parsedArchetype,
+                        personality = obj.optString("personality").trim(),
+                        boundaries = obj.optString("boundaries").trim()
                     )
+                    add(NpcTrustGuardrail.apply(rawRelation, prev))
                 }
             }
             if (activeNpc.hasActiveNpc &&
                 activeNpc.name.isNotBlank() &&
                 none { it.name.equals(activeNpc.name, ignoreCase = true) }
             ) {
-                add(
-                    NpcRelation(
-                        name = activeNpc.name,
-                        role = "Собеседник в сцене",
-                        trustLevel = 0L,
-                        statusLabel = "Первая встреча",
-                        lastEmotion = activeNpc.emotionLabel,
-                        lastEmotionCategory = activeNpc.emotionCategory,
-                        archetype = activeNpcArchetype
-                    )
+                val prev = previousNpcs.firstOrNull { it.name.equals(activeNpc.name, ignoreCase = true) }
+                val fallbackRelation = NpcRelation(
+                    name = activeNpc.name,
+                    role = prev?.role?.ifBlank { "Собеседник в сцене" } ?: "Собеседник в сцене",
+                    trustLevel = prev?.trustLevel ?: 0L,
+                    statusLabel = prev?.statusLabel?.ifBlank { "Держит дистанцию" } ?: "Держит дистанцию",
+                    lastEmotion = activeNpc.emotionLabel,
+                    lastEmotionCategory = activeNpc.emotionCategory,
+                    archetype = activeNpcArchetype,
+                    personality = prev?.personality.orEmpty(),
+                    boundaries = prev?.boundaries.orEmpty()
                 )
+                add(NpcTrustGuardrail.apply(fallbackRelation, prev))
+            }
+            // Keep previously tracked NPCs so long-term boundaries & trust persist across scenes
+            previousNpcs.forEach { prev ->
+                if (none { it.name.equals(prev.name, ignoreCase = true) } && size < 40) {
+                    add(prev)
+                }
             }
         }
 
@@ -522,8 +847,8 @@ class GameMasterAiRepository(
 
     private companion object {
         const val TAG = "GameMasterAiRepo"
-        const val PRIMARY_TIMEOUT_MS = 20_000L
-        const val FALLBACK_TIMEOUT_MS = 35_000L
+        const val FLASH_38_TIMEOUT_MS = 20_000L
+        const val FLASH_LITE_TIMEOUT_MS = 35_000L
         const val COOLDOWN_MS = 120_000L
     }
 }

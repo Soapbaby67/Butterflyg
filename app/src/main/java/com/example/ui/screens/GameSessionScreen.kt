@@ -22,6 +22,8 @@ import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.lazy.LazyColumn
+import androidx.compose.foundation.lazy.LazyRow
+import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.lazy.itemsIndexed
 import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.foundation.shape.RoundedCornerShape
@@ -34,10 +36,16 @@ import androidx.compose.material.icons.automirrored.filled.Send
 import androidx.compose.material.icons.automirrored.outlined.MenuBook
 import androidx.compose.material.icons.outlined.AutoAwesome
 import androidx.compose.material.icons.outlined.Bolt
+import androidx.compose.material.icons.outlined.EditNote
 import androidx.compose.material.icons.outlined.Explore
+import androidx.compose.material.icons.outlined.FavoriteBorder
 import androidx.compose.material.icons.outlined.Forum
+import androidx.compose.material.icons.outlined.LocalCafe
 import androidx.compose.material.icons.outlined.Refresh
+import androidx.compose.material.icons.outlined.Settings
+import androidx.compose.material.icons.outlined.Spa
 import androidx.compose.material.icons.outlined.VisibilityOff
+import androidx.compose.material.icons.outlined.Whatshot
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.FilledIconButton
@@ -58,6 +66,7 @@ import androidx.compose.material3.minimumInteractiveComponentSize
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.saveable.rememberSaveable
@@ -76,14 +85,15 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.example.R
+import com.example.core.rememberRpgHaptics
 import com.example.data.model.CampaignTurn
 import com.example.data.model.TurnChoice
-import com.example.data.repository.PaperThemeMode
 import com.example.ui.components.HudStatsParser
 import com.example.ui.components.HudStatusPanel
+import com.example.ui.components.ItemActionSheet
 import com.example.ui.components.NpcEmotionCard
-import com.example.ui.components.PaperThemeToggleButton
 import com.example.ui.components.SceneAtmosphereBanner
+import com.example.ui.components.itemCategoryIcon
 import com.example.ui.theme.UniverseVisualPalette
 import com.example.ui.theme.rememberUniverseVisualPalette
 import com.example.ui.viewmodel.GameSessionData
@@ -95,15 +105,19 @@ import com.example.ui.viewmodel.UiState
 @Composable
 fun GameSessionScreen(
     viewModel: GameSessionViewModel,
-    themeMode: PaperThemeMode,
-    onCycleTheme: () -> Unit,
+    hapticsEnabled: Boolean,
+    onOpenSettings: () -> Unit,
     onBack: () -> Unit
 ) {
     val sessionState by viewModel.sessionState.collectAsStateWithLifecycle()
     val submissionState by viewModel.submissionState.collectAsStateWithLifecycle()
+    val facts by viewModel.facts.collectAsStateWithLifecycle()
+    val haptics = rememberRpgHaptics(hapticsEnabled)
 
     var customActionText by rememberSaveable { mutableStateOf("") }
     var showCodex by remember { mutableStateOf(false) }
+    var codexInitialTab by remember { mutableIntStateOf(0) }
+    var selectedItemForAction by remember { mutableStateOf<String?>(null) }
     val listState = rememberLazyListState()
 
     val successData = (sessionState as? UiState.Success<GameSessionData>)?.data
@@ -111,7 +125,30 @@ fun GameSessionScreen(
         universe = successData?.campaign?.universe.orEmpty()
     )
 
-    LaunchedEffect(successData?.turns?.size, submissionState) {
+    // Haptic feedback when new turn arrives or butterfly event triggers
+    var lastTurnCount by rememberSaveable(successData?.campaign?.id) {
+        mutableStateOf<Long?>(null)
+    }
+    var lastButterflyCount by rememberSaveable(successData?.campaign?.id) {
+        mutableStateOf<Int?>(null)
+    }
+
+    LaunchedEffect(successData?.campaign?.turnCount, successData?.campaign?.butterflyEvents?.size) {
+        val campaign = successData?.campaign ?: return@LaunchedEffect
+        val prevTurns = lastTurnCount
+        val prevButterflies = lastButterflyCount
+        if (prevTurns != null && prevButterflies != null) {
+            if (campaign.butterflyEvents.size > prevButterflies) {
+                haptics.butterflyShift()
+            } else if (campaign.turnCount > prevTurns) {
+                haptics.impactConfirm()
+            }
+        }
+        lastTurnCount = campaign.turnCount
+        lastButterflyCount = campaign.butterflyEvents.size
+    }
+
+    LaunchedEffect(successData?.turns?.size, submissionState is TurnSubmissionState.Generating) {
         val count = successData?.turns?.size ?: 0
         if (count > 0) {
             listState.animateScrollToItem(index = count + 1)
@@ -161,7 +198,31 @@ fun GameSessionScreen(
                 actions = {
                     if (successData != null) {
                         IconButton(
-                            onClick = { showCodex = true },
+                            onClick = {
+                                haptics.tap()
+                                codexInitialTab = 3
+                                showCodex = true
+                            },
+                            modifier = Modifier
+                                .minimumInteractiveComponentSize()
+                                .testTag("open_facts_button")
+                        ) {
+                            Icon(
+                                imageVector = Icons.Outlined.EditNote,
+                                contentDescription = "Блокнот фактов (${facts.count { it.isPinned }})",
+                                tint = if (facts.any { it.isPinned }) {
+                                    universePalette.accentPrimary
+                                } else {
+                                    MaterialTheme.colorScheme.onBackground
+                                }
+                            )
+                        }
+                        IconButton(
+                            onClick = {
+                                haptics.tap()
+                                codexInitialTab = 0
+                                showCodex = true
+                            },
                             modifier = Modifier
                                 .minimumInteractiveComponentSize()
                                 .testTag("open_codex_button")
@@ -172,10 +233,20 @@ fun GameSessionScreen(
                             )
                         }
                     }
-                    PaperThemeToggleButton(
-                        themeMode = themeMode,
-                        onCycleTheme = onCycleTheme
-                    )
+                    IconButton(
+                        onClick = {
+                            haptics.tap()
+                            onOpenSettings()
+                        },
+                        modifier = Modifier
+                            .minimumInteractiveComponentSize()
+                            .testTag("session_settings_button")
+                    ) {
+                        Icon(
+                            imageVector = Icons.Outlined.Settings,
+                            contentDescription = "Настройки чтения и ИИ"
+                        )
+                    }
                 }
             )
         },
@@ -218,7 +289,10 @@ fun GameSessionScreen(
                                             )
                                         }
                                         TextButton(
-                                            onClick = { viewModel.submitPlayerAction(err.failedAction) }
+                                            onClick = {
+                                                haptics.tap()
+                                                viewModel.submitPlayerAction(err.failedAction)
+                                            }
                                         ) {
                                             Icon(
                                                 imageVector = Icons.Outlined.Refresh,
@@ -227,6 +301,53 @@ fun GameSessionScreen(
                                             )
                                             Spacer(modifier = Modifier.width(4.dp))
                                             Text("Повторить")
+                                        }
+                                    }
+                                }
+                            }
+                        }
+
+                        // Real-time interactive Quick-Use Inventory Tray
+                        val inventoryItems = successData.campaign.inventory
+                        if (inventoryItems.isNotEmpty() && submissionState !is TurnSubmissionState.Generating) {
+                            LazyRow(
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .widthIn(max = 680.dp)
+                                    .padding(bottom = 8.dp)
+                                    .testTag("quick_inventory_tray"),
+                                horizontalArrangement = Arrangement.spacedBy(6.dp)
+                            ) {
+                                items(inventoryItems) { item ->
+                                    Surface(
+                                        color = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.72f),
+                                        shape = RoundedCornerShape(999.dp),
+                                        border = BorderStroke(1.dp, universePalette.accentPrimary.copy(alpha = 0.34f)),
+                                        modifier = Modifier
+                                            .clip(RoundedCornerShape(999.dp))
+                                            .clickable {
+                                                haptics.tap()
+                                                selectedItemForAction = item
+                                            }
+                                    ) {
+                                        Row(
+                                            verticalAlignment = Alignment.CenterVertically,
+                                            horizontalArrangement = Arrangement.spacedBy(5.dp),
+                                            modifier = Modifier.padding(horizontal = 10.dp, vertical = 5.dp)
+                                        ) {
+                                            Icon(
+                                                imageVector = itemCategoryIcon(item),
+                                                contentDescription = null,
+                                                tint = universePalette.accentPrimary,
+                                                modifier = Modifier.size(13.dp)
+                                            )
+                                            Text(
+                                                text = item,
+                                                style = MaterialTheme.typography.labelSmall,
+                                                color = MaterialTheme.colorScheme.onSurface,
+                                                maxLines = 1,
+                                                overflow = TextOverflow.Ellipsis
+                                            )
                                         }
                                     }
                                 }
@@ -250,6 +371,7 @@ fun GameSessionScreen(
                                 keyboardActions = KeyboardActions(
                                     onSend = {
                                         if (customActionText.isNotBlank()) {
+                                            haptics.tap()
                                             val text = customActionText
                                             customActionText = ""
                                             viewModel.submitPlayerAction(text)
@@ -262,6 +384,7 @@ fun GameSessionScreen(
                             )
                             FilledIconButton(
                                 onClick = {
+                                    haptics.tap()
                                     val text = customActionText
                                     customActionText = ""
                                     viewModel.submitPlayerAction(text)
@@ -322,7 +445,7 @@ fun GameSessionScreen(
                 is UiState.Success -> {
                     val data = state.data
                     val latestTurn = data.turns.lastOrNull()
-                    val isGenerating = submissionState is TurnSubmissionState.Generating
+                    val generatingState = submissionState as? TurnSubmissionState.Generating
                     val parsedStats = remember(
                         data.campaign.hudStatusAndInventory,
                         data.campaign.hudRelationsAndCanon,
@@ -353,6 +476,10 @@ fun GameSessionScreen(
                             campaign = data.campaign,
                             stats = parsedStats,
                             palette = universePalette,
+                            onItemClick = { item ->
+                                haptics.tap()
+                                selectedItemForAction = item
+                            },
                             modifier = Modifier.padding(horizontal = 16.dp, vertical = 6.dp)
                         )
 
@@ -373,7 +500,13 @@ fun GameSessionScreen(
                                     location = data.campaign.hudLocation,
                                     timeLabel = data.campaign.hudTime,
                                     weatherMood = parsedStats.weatherMood,
-                                    palette = universePalette
+                                    palette = universePalette,
+                                    onClick = {
+                                        if (generatingState == null && customActionText.isBlank()) {
+                                            haptics.tap()
+                                            customActionText = "Осмотреться вокруг (${data.campaign.hudLocation.ifBlank { "в сцене" }}): "
+                                        }
+                                    }
                                 )
                             }
 
@@ -395,13 +528,19 @@ fun GameSessionScreen(
                                         npc = data.campaign.activeNpc,
                                         universe = data.campaign.universe,
                                         palette = universePalette,
-                                        npcRelation = activeNpcRelation
+                                        npcRelation = activeNpcRelation,
+                                        onClick = {
+                                            if (generatingState == null && customActionText.isBlank()) {
+                                                haptics.tap()
+                                                customActionText = "Обратиться к ${data.campaign.activeNpc.name}: "
+                                            }
+                                        }
                                     )
 
-                                    if (isGenerating) {
-                                        val pending = (submissionState as TurnSubmissionState.Generating).pendingAction
+                                    if (generatingState != null) {
                                         GeneratingTurnCard(
-                                            pendingAction = pending,
+                                            pendingAction = generatingState.pendingAction,
+                                            streamingNarrative = generatingState.streamingNarrative,
                                             palette = universePalette
                                         )
                                     } else if (latestTurn != null && latestTurn.choices.isNotEmpty()) {
@@ -414,7 +553,10 @@ fun GameSessionScreen(
                                             ChoiceActionCard(
                                                 choice = choice,
                                                 palette = universePalette,
-                                                onClick = { viewModel.submitPlayerAction(choice.text) }
+                                                onClick = {
+                                                    haptics.tap()
+                                                    viewModel.submitPlayerAction(choice.text)
+                                                }
                                             )
                                         }
                                     }
@@ -430,7 +572,62 @@ fun GameSessionScreen(
     if (showCodex && successData != null) {
         CodexBottomSheet(
             campaign = successData.campaign,
+            facts = facts,
+            initialTabIndex = codexInitialTab,
+            onAddFact = { text ->
+                haptics.tap()
+                viewModel.addFact(text)
+            },
+            onToggleFactPinned = { id ->
+                haptics.tap()
+                viewModel.toggleFactPinned(id)
+            },
+            onDeleteFact = { id ->
+                haptics.tap()
+                viewModel.deleteFact(id)
+            },
+            onItemClick = { item ->
+                haptics.tap()
+                showCodex = false
+                selectedItemForAction = item
+            },
             onDismiss = { showCodex = false }
+        )
+    }
+
+    val activeItem = selectedItemForAction
+    if (activeItem != null && successData != null) {
+        val activeNpcName = if (successData.campaign.activeNpc.hasActiveNpc &&
+            successData.campaign.activeNpc.name.isNotBlank()
+        ) {
+            successData.campaign.activeNpc.name
+        } else {
+            null
+        }
+
+        ItemActionSheet(
+            itemName = activeItem,
+            activeNpcName = activeNpcName,
+            palette = universePalette,
+            isBusy = submissionState is TurnSubmissionState.Generating,
+            onDismiss = { selectedItemForAction = null },
+            onUseInScene = { item ->
+                haptics.impactConfirm()
+                viewModel.submitPlayerAction("Использовать предмет из инвентаря: «$item» в текущей ситуации.")
+            },
+            onGiveToNpc = { item, npcName ->
+                haptics.impactConfirm()
+                viewModel.submitPlayerAction("Показать или передать предмет «$item» персонажу $npcName.")
+            },
+            onInsertIntoDraft = { item ->
+                haptics.tap()
+                val addition = "Использую предмет «$item» — "
+                customActionText = if (customActionText.isBlank()) {
+                    addition
+                } else {
+                    "${customActionText.trimEnd()} ($item) "
+                }
+            }
         )
     }
 }
@@ -565,6 +762,14 @@ private fun resolveApproachVisuals(
 ): Pair<Color, ImageVector> {
     val lower = approach.lowercase()
     return when {
+        lower.contains("роман") || lower.contains("флирт") || lower.contains("нежн") ->
+            palette.choiceDiplomacyColor to Icons.Outlined.FavoriteBorder
+        lower.contains("забот") || lower.contains("поддерж") || lower.contains("эмоц") ->
+            palette.healthHigh to Icons.Outlined.Spa
+        lower.contains("быт") || lower.contains("рутин") || lower.contains("уют") ->
+            palette.accentSecondary to Icons.Outlined.LocalCafe
+        lower.contains("дерз") || lower.contains("вызов") || lower.contains("риск") ->
+            palette.choiceForceColor to Icons.Outlined.Whatshot
         lower.contains("сил") || lower.contains("атак") || lower.contains("бой") ->
             palette.choiceForceColor to Icons.Outlined.Bolt
         lower.contains("диплом") || lower.contains("перегов") || lower.contains("убеж") ->
@@ -582,13 +787,16 @@ private fun resolveApproachVisuals(
 @Composable
 private fun GeneratingTurnCard(
     pendingAction: String,
+    streamingNarrative: String,
     palette: UniverseVisualPalette
 ) {
     Surface(
         color = MaterialTheme.colorScheme.surface,
         shape = MaterialTheme.shapes.medium,
         border = BorderStroke(1.dp, palette.accentPrimary.copy(alpha = 0.35f)),
-        modifier = Modifier.fillMaxWidth()
+        modifier = Modifier
+            .fillMaxWidth()
+            .testTag("generating_turn_card")
     ) {
         Column(
             modifier = Modifier.padding(16.dp),
@@ -604,11 +812,20 @@ private fun GeneratingTurnCard(
                 color = palette.accentPrimary,
                 trackColor = MaterialTheme.colorScheme.outlineVariant
             )
-            Text(
-                text = "Мастер плетёт нити событий и оценивает последствия…",
-                style = MaterialTheme.typography.bodySmall,
-                color = palette.accentPrimary
-            )
+            if (streamingNarrative.isNotBlank()) {
+                Text(
+                    text = streamingNarrative,
+                    style = MaterialTheme.typography.bodyLarge,
+                    color = MaterialTheme.colorScheme.onSurface,
+                    modifier = Modifier.testTag("streaming_narrative_text")
+                )
+            } else {
+                Text(
+                    text = "Мастер плетёт нити событий и оценивает последствия…",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = palette.accentPrimary
+                )
+            }
         }
     }
 }

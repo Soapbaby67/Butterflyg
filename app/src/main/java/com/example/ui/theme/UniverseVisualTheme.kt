@@ -8,6 +8,8 @@ import com.example.R
 import kotlin.math.abs
 
 enum class UniverseArchetype(val displayTag: String) {
+    COZY_ROMANCE("Романтика и уют"),
+    SPACE_SCIFI("Космос и Sci-Fi"),
     WITCHER_FANTASY("Тёмное фэнтези"),
     CYBERPUNK_SCIFI("Киберпанк"),
     SHINOBI_ANIME("Мир шиноби"),
@@ -24,7 +26,7 @@ enum class WeatherMood(val russianLabel: String) {
     DAWN("Рассвет"),
     DAY("День"),
     SNOW("Снег"),
-    INDOOR_CANDLE("Помещение"),
+    INDOOR_CANDLE("Уютный свет"),
     NEON_NIGHT("Неон")
 }
 
@@ -92,18 +94,27 @@ fun rememberUniverseVisualPalette(
 fun resolveUniverseArchetype(universe: String): UniverseArchetype {
     val lower = universe.lowercase()
     return when {
+        lower.contains("орбиталь") || lower.contains("космос") ||
+            lower.contains("челнок") || lower.contains("звездол") ||
+            lower.contains("научная фантастика") -> UniverseArchetype.SPACE_SCIFI
+
+        lower.contains("романт") || lower.contains("повседневн") ||
+            lower.contains("рутин") || lower.contains("кампус") ||
+            lower.contains("кофей") || lower.contains("slice of life") ||
+            lower.contains("бытовая магия") -> UniverseArchetype.COZY_ROMANCE
+
         lower.contains("cyberpunk") || lower.contains("кибер") ||
             lower.contains("найт-сити") || lower.contains("sci-fi") ||
-            lower.contains("космос") || lower.contains("неон") -> UniverseArchetype.CYBERPUNK_SCIFI
+            lower.contains("неон") -> UniverseArchetype.CYBERPUNK_SCIFI
 
         lower.contains("наруто") || lower.contains("шиноби") ||
-            lower.contains("конох") || lower.contains("аниме") && lower.contains("лист") -> UniverseArchetype.SHINOBI_ANIME
+            lower.contains("конох") || (lower.contains("аниме") && lower.contains("лист")) -> UniverseArchetype.SHINOBI_ANIME
 
         lower.contains("титан") || lower.contains("парадиз") ||
             lower.contains("сигансин") || lower.contains("постапок") -> UniverseArchetype.TITAN_SURVIVAL
 
         lower.contains("поттер") || lower.contains("хогвартс") ||
-            lower.contains("слизерин") || lower.contains("маги") && lower.contains("замок") -> UniverseArchetype.ARCANE_MYSTERY
+            lower.contains("слизерин") || (lower.contains("маги") && lower.contains("замок")) -> UniverseArchetype.ARCANE_MYSTERY
 
         lower.contains("ведьмак") || lower.contains("новиград") ||
             lower.contains("королевств") || lower.contains("фэнтези") ||
@@ -117,6 +128,16 @@ fun resolveUniverseVisualPalette(universe: String, isDark: Boolean): UniverseVis
     val archetype = resolveUniverseArchetype(universe)
 
     val (primary, secondary, atmTint) = when (archetype) {
+        UniverseArchetype.COZY_ROMANCE -> Triple(
+            if (isDark) Color(0xFFE68A8F) else Color(0xFFA63E4B),
+            if (isDark) Color(0xFFE0B46B) else Color(0xFF9C6624),
+            Color(0xFF281B1A)
+        )
+        UniverseArchetype.SPACE_SCIFI -> Triple(
+            if (isDark) Color(0xFF66B9F2) else Color(0xFF1D6296),
+            if (isDark) Color(0xFFD6A85C) else Color(0xFF8C5D18),
+            Color(0xFF0E1826)
+        )
         UniverseArchetype.WITCHER_FANTASY -> Triple(
             if (isDark) Color(0xFFD68D4A) else Color(0xFF7D3E1C),
             if (isDark) Color(0xFF8AA8BE) else Color(0xFF3E5A70),
@@ -177,9 +198,26 @@ fun resolveSceneBackdropRes(
     val arch = resolveUniverseArchetype(universe)
     val locLower = location.lowercase()
 
+    if (arch == UniverseArchetype.SPACE_SCIFI ||
+        locLower.contains("челнок") || locLower.contains("палуб") ||
+        locLower.contains("орбит") || locLower.contains("шлюз") ||
+        locLower.contains("отсек")
+    ) {
+        return R.drawable.img_scene_space_station
+    }
+
+    if (arch == UniverseArchetype.COZY_ROMANCE ||
+        locLower.contains("кофе") || locLower.contains("пекар") ||
+        locLower.contains("кампус") || locLower.contains("общежит") ||
+        locLower.contains("лавк") || locLower.contains("кухн") ||
+        locLower.contains("кафе") || locLower.contains("квартир")
+    ) {
+        return R.drawable.img_scene_cozy_cafe
+    }
+
     if (arch == UniverseArchetype.CYBERPUNK_SCIFI ||
         weatherMood == WeatherMood.NEON_NIGHT ||
-        locLower.contains("бар") && arch == UniverseArchetype.CYBERPUNK_SCIFI ||
+        (locLower.contains("бар") && arch == UniverseArchetype.CYBERPUNK_SCIFI) ||
         locLower.contains("неон") || locLower.contains("кибер") || locLower.contains("сектор")
     ) {
         return R.drawable.img_scene_neon_district
@@ -205,7 +243,8 @@ fun resolveSceneBackdropRes(
 
     return when (weatherMood) {
         WeatherMood.NEON_NIGHT -> R.drawable.img_scene_neon_district
-        WeatherMood.INDOOR_CANDLE, WeatherMood.FOG, WeatherMood.DAWN -> R.drawable.img_scene_ancient_sanctum
+        WeatherMood.INDOOR_CANDLE -> R.drawable.img_scene_cozy_cafe
+        WeatherMood.FOG, WeatherMood.DAWN -> R.drawable.img_scene_ancient_sanctum
         else -> R.drawable.img_scene_fantasy_harbor
     }
 }
@@ -223,7 +262,8 @@ fun resolveNpcPortraitSpec(
     val inferred = NpcArchetype.fromKey(explicitArchetype) ?: when {
         combined.contains("фиксер") || combined.contains("нетраннер") ||
             combined.contains("хакер") || combined.contains("киборг") ||
-            combined.contains("корпорат") -> NpcArchetype.CYBER
+            combined.contains("корпорат") || combined.contains("пилот") ||
+            combined.contains("инженер") || combined.contains("бортовой") -> NpcArchetype.CYBER
 
         combined.contains("титан") || combined.contains("чудовищ") ||
             combined.contains("монстр") || combined.contains("звер") ||
@@ -232,11 +272,13 @@ fun resolveNpcPortraitSpec(
         combined.contains("контрабанд") || combined.contains("вор") ||
             combined.contains("шпион") || combined.contains("убийц") ||
             combined.contains("развед") || combined.contains("агент") ||
-            combined.contains("тень") || combined.contains("плут") -> NpcArchetype.ROGUE
+            combined.contains("тень") || combined.contains("плут") ||
+            combined.contains("напарник") || combined.contains("оператив") -> NpcArchetype.ROGUE
 
         combined.contains("торгов") || combined.contains("купец") ||
             combined.contains("трактир") || combined.contains("корчмар") ||
-            combined.contains("ростов") || combined.contains("лавк") -> NpcArchetype.MERCHANT
+            combined.contains("ростов") || combined.contains("лавк") ||
+            combined.contains("бариста") || combined.contains("пекар") -> NpcArchetype.MERCHANT
 
         combined.contains("леди") || combined.contains("графин") ||
             combined.contains("княж") || combined.contains("королев") ||
@@ -253,9 +295,11 @@ fun resolveNpcPortraitSpec(
         combined.contains("маг") || combined.contains("наставник") ||
             combined.contains("учён") || combined.contains("жрец") ||
             combined.contains("профессор") || combined.contains("инквизитор") ||
-            combined.contains("алхимик") || combined.contains("лекар") -> NpcArchetype.MAGE
+            combined.contains("алхимик") || combined.contains("лекар") ||
+            combined.contains("доктор") || combined.contains("преподав") -> NpcArchetype.MAGE
 
-        universeArch == UniverseArchetype.CYBERPUNK_SCIFI -> NpcArchetype.CYBER
+        universeArch == UniverseArchetype.CYBERPUNK_SCIFI ||
+            universeArch == UniverseArchetype.SPACE_SCIFI -> NpcArchetype.CYBER
 
         else -> {
             val hash = abs(name.trim().lowercase().hashCode())
@@ -311,7 +355,8 @@ private fun isLikelyFemaleRussianName(name: String): Boolean {
     val femaleKnown = setOf(
         "трисс", "йеннифэр", "цири", "микаса", "энни", "хистория", "сакура",
         "цунаде", "хината", "гермиона", "джинни", "полумна", "беллатриса",
-        "джуди", "панам", "роуг", "кейра", "шани", "эвелин"
+        "джуди", "панам", "роуг", "кейра", "шани", "эвелин", "арина",
+        "алиса", "елена", "софия", "анна", "дарья", "полина", "ксюша", "вера"
     )
     if (firstWord in femaleKnown) return true
     val maleExceptions = setOf("никита", "илья", "лука", "фома", "кузьма", "савва", "данила")

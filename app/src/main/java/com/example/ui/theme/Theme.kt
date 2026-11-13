@@ -8,9 +8,12 @@ import androidx.compose.material3.darkColorScheme
 import androidx.compose.material3.lightColorScheme
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.CompositionLocalProvider
+import androidx.compose.runtime.remember
 import androidx.compose.runtime.staticCompositionLocalOf
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.unit.dp
+import com.example.data.repository.ReadingFontScale
+import com.example.data.repository.ReadingFontStyle
 
 val LocalIsDarkPaper = staticCompositionLocalOf { false }
 
@@ -66,14 +69,19 @@ private val BookishShapes = Shapes(
 @Composable
 fun ChroniclesTheme(
     darkTheme: Boolean = isSystemInDarkTheme(),
+    fontStyle: ReadingFontStyle = ReadingFontStyle.LITERATA,
+    fontScale: ReadingFontScale = ReadingFontScale.NORMAL,
     content: @Composable () -> Unit
 ) {
     val colorScheme = if (darkTheme) DarkPaperColorScheme else LightPaperColorScheme
+    val typography = remember(fontStyle, fontScale) {
+        buildChroniclesTypography(fontStyle = fontStyle, fontScale = fontScale)
+    }
 
     CompositionLocalProvider(LocalIsDarkPaper provides darkTheme) {
         MaterialTheme(
             colorScheme = colorScheme,
-            typography = Typography,
+            typography = typography,
             shapes = BookishShapes,
             content = content
         )
