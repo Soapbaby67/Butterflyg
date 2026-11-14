@@ -446,12 +446,13 @@ fun GameSessionScreen(
                                                 .widthIn(max = 680.dp)
                                                 .padding(bottom = 8.dp)
                                         ) {
-                                            Row(
-                                                modifier = Modifier.padding(horizontal = 12.dp, vertical = 8.dp),
-                                                verticalAlignment = Alignment.CenterVertically,
-                                                horizontalArrangement = Arrangement.spacedBy(8.dp)
+                                            Column(
+                                                modifier = Modifier
+                                                    .fillMaxWidth()
+                                                    .padding(horizontal = 12.dp, vertical = 8.dp),
+                                                verticalArrangement = Arrangement.spacedBy(4.dp)
                                             ) {
-                                                SelectionContainer(modifier = Modifier.weight(1f)) {
+                                                SelectionContainer(modifier = Modifier.fillMaxWidth()) {
                                                     Text(
                                                         text = err.message,
                                                         style = MaterialTheme.typography.bodySmall,
@@ -463,7 +464,8 @@ fun GameSessionScreen(
                                                         haptics.tap()
                                                         viewModel.submitPlayerAction(err.failedAction)
                                                     },
-                                                    contentPadding = PaddingValues(horizontal = 8.dp, vertical = 4.dp)
+                                                    modifier = Modifier.align(Alignment.End),
+                                                    contentPadding = PaddingValues(horizontal = 10.dp, vertical = 4.dp)
                                                 ) {
                                                     Icon(
                                                         imageVector = Icons.Outlined.Refresh,

@@ -272,7 +272,8 @@ object NpcTrustGuardrail {
 }
 
 class GameMasterAiRepository(
-    private val debugTokenProvider: () -> String? = { null }
+    private val debugTokenProvider: () -> String? = { null },
+    private val appCheckDiagnosticProvider: suspend () -> String? = { null }
 ) {
     @Volatile
     private var flash38CooldownUntilMs: Long = 0L
@@ -635,18 +636,18 @@ class GameMasterAiRepository(
         } catch (e: Exception) {
             Log.e(TAG, "Firebase AI generation failed", e)
             val detailedMessage = extractDetailedErrorMessage(e)
-            val debugToken = if (
-                detailedMessage.contains("App Check", ignoreCase = true) ||
-                detailedMessage.contains("token is invalid", ignoreCase = true) ||
-                detailedMessage.contains("403", ignoreCase = true)
-            ) {
-                debugTokenProvider()
+            val isAppCheck = isAppCheckError(e)
+            val debugToken = if (isAppCheck) debugTokenProvider() else null
+            val releaseDiag = if (isAppCheck && debugToken.isNullOrBlank()) {
+                runCatching { appCheckDiagnosticProvider() }.getOrNull()
             } else {
                 null
             }
             val finalMessage = when {
                 !debugToken.isNullOrBlank() ->
                     "$detailedMessage\n\nDebug-токен этого телефона:\n$debugToken\n\nДобавьте его в Firebase Console → App Check → Apps → Manage debug tokens."
+                !releaseDiag.isNullOrBlank() ->
+                    "$detailedMessage\n$releaseDiag"
                 isQuotaOrRateLimitError(e) ->
                     formatQuotaErrorMessage(detailedMessage)
                 else -> detailedMessage

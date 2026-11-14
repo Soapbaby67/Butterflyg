@@ -31,6 +31,7 @@ import com.example.auth.attemptAutoSignIn
 import com.example.auth.findActivity
 import com.example.auth.signOutUser
 import com.example.core.configureAppCheck
+import com.example.core.diagnoseAppCheckFailure
 import com.example.core.getLocalAppCheckDebugToken
 import com.example.data.repository.CampaignRepository
 import com.example.data.repository.GameMasterAiRepository
@@ -212,7 +213,8 @@ private fun AuthenticatedNavHost(
 
     val aiRepository = remember(appContext) {
         GameMasterAiRepository(
-            debugTokenProvider = { getLocalAppCheckDebugToken(appContext) }
+            debugTokenProvider = { getLocalAppCheckDebugToken(appContext) },
+            appCheckDiagnosticProvider = { diagnoseAppCheckFailure(appContext) }
         )
     }
     val factsRepository = remember(appContext) {

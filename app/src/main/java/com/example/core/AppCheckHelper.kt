@@ -8,6 +8,8 @@ import com.google.firebase.FirebaseApp
 import com.google.firebase.appcheck.FirebaseAppCheck
 import com.google.firebase.appcheck.debug.DebugAppCheckProviderFactory
 import com.google.firebase.appcheck.recaptcha.RecaptchaAppCheckProviderFactory
+import kotlinx.coroutines.tasks.await
+import kotlinx.coroutines.withTimeoutOrNull
 
 private const val TAG = "AppCheckInit"
 
@@ -81,5 +83,34 @@ fun getLocalAppCheckDebugToken(context: Context): String? {
         prefs.getString(DEBUG_SECRET_KEY, null)?.takeIf { it.isNotBlank() }
     } catch (_: Exception) {
         null
+    }
+}
+
+suspend fun diagnoseAppCheckFailure(context: Context): String? {
+    if (BuildConfig.DEBUG) return null
+    val resId = context.resources.getIdentifier(RECAPTCHA_SITE_KEY_RES, "string", context.packageName)
+    val siteKey = if (resId != 0) context.getString(resId).trim() else ""
+    val keyPreview = if (siteKey.length >= 10) {
+        "${siteKey.take(6)}…${siteKey.takeLast(4)}"
+    } else if (siteKey.isNotBlank()) {
+        siteKey
+    } else {
+        "отсутствует"
+    }
+
+    return try {
+        val result = withTimeoutOrNull(8_000L) {
+            FirebaseAppCheck.getInstance().getAppCheckToken(true).await()
+        }
+        if (result == null) {
+            "Диагностика (key=$keyPreview): таймаут получения токена reCAPTCHA."
+        } else if (result.token.isBlank()) {
+            "Диагностика (key=$keyPreview): получен пустой App Check токен."
+        } else {
+            "Диагностика (key=$keyPreview): клиент получил токен, но Firebase отклонил его — проверьте, что в Firebase Console → App Check нажата кнопка Save и выбран этот же ключ."
+        }
+    } catch (e: Exception) {
+        val detail = e.localizedMessage ?: e.message ?: e::class.java.simpleName
+        "Диагностика (key=$keyPreview): ошибка получения токена — $detail"
     }
 }
