@@ -3,6 +3,7 @@ package com.example.ui.screens
 import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.ExperimentalLayoutApi
 import androidx.compose.foundation.layout.FlowRow
@@ -80,13 +81,6 @@ fun CodexBottomSheet(
     var selectedTab by remember(initialTabIndex) {
         mutableIntStateOf(initialTabIndex.coerceIn(0, 3))
     }
-    val tabs = listOf(
-        "Герой",
-        "NPC (${campaign.npcs.size})",
-        "Бабочка",
-        "Факты (${facts.size})"
-    )
-    val universePalette = rememberUniverseVisualPalette(campaign.universe)
 
     ModalBottomSheet(
         onDismissRequest = onDismiss,
@@ -94,46 +88,82 @@ fun CodexBottomSheet(
         containerColor = MaterialTheme.colorScheme.surface,
         contentColor = MaterialTheme.colorScheme.onSurface
     ) {
-        Column(
+        CodexContent(
+            campaign = campaign,
+            facts = facts,
+            selectedTab = selectedTab,
+            onTabSelect = { selectedTab = it },
+            onAddFact = onAddFact,
+            onToggleFactPinned = onToggleFactPinned,
+            onDeleteFact = onDeleteFact,
+            onItemClick = onItemClick,
             modifier = Modifier
                 .fillMaxWidth()
                 .navigationBarsPadding()
+        )
+    }
+}
+
+@OptIn(ExperimentalMaterial3Api::class)
+@Composable
+fun CodexContent(
+    campaign: Campaign,
+    facts: List<PlayerFactNote> = emptyList(),
+    selectedTab: Int = 0,
+    onTabSelect: (Int) -> Unit = {},
+    onAddFact: (String) -> Unit = {},
+    onToggleFactPinned: (String) -> Unit = {},
+    onDeleteFact: (String) -> Unit = {},
+    onItemClick: (String) -> Unit = {},
+    modifier: Modifier = Modifier
+) {
+    val tabs = listOf(
+        "Герой",
+        "NPC (${campaign.npcs.size})",
+        "Бабочка",
+        "Факты (${facts.size})"
+    )
+    val universePalette = rememberUniverseVisualPalette(campaign.universe)
+    val clampedTab = selectedTab.coerceIn(0, 3)
+
+    Column(modifier = modifier.fillMaxWidth()) {
+        Text(
+            text = "Кодекс: ${campaign.title}",
+            style = MaterialTheme.typography.titleLarge,
+            color = MaterialTheme.colorScheme.onSurface,
+            modifier = Modifier.padding(horizontal = 20.dp, vertical = 4.dp)
+        )
+        Text(
+            text = campaign.universe,
+            style = MaterialTheme.typography.bodySmall,
+            color = universePalette.accentPrimary,
+            modifier = Modifier.padding(horizontal = 20.dp)
+        )
+
+        Spacer(modifier = Modifier.height(10.dp))
+
+        PrimaryTabRow(
+            selectedTabIndex = clampedTab,
+            containerColor = MaterialTheme.colorScheme.surface.copy(alpha = 0.85f)
         ) {
-            Text(
-                text = "Кодекс: ${campaign.title}",
-                style = MaterialTheme.typography.titleLarge,
-                modifier = Modifier.padding(horizontal = 20.dp, vertical = 4.dp)
-            )
-            Text(
-                text = campaign.universe,
-                style = MaterialTheme.typography.bodySmall,
-                color = universePalette.accentPrimary,
-                modifier = Modifier.padding(horizontal = 20.dp)
-            )
-
-            Spacer(modifier = Modifier.height(10.dp))
-
-            PrimaryTabRow(
-                selectedTabIndex = selectedTab,
-                containerColor = MaterialTheme.colorScheme.surface
-            ) {
-                tabs.forEachIndexed { index, title ->
-                    Tab(
-                        selected = selectedTab == index,
-                        onClick = { selectedTab = index },
-                        text = {
-                            Text(
-                                text = title,
-                                style = MaterialTheme.typography.labelLarge,
-                                maxLines = 1,
-                                overflow = TextOverflow.Ellipsis
-                            )
-                        }
-                    )
-                }
+            tabs.forEachIndexed { index, title ->
+                Tab(
+                    selected = clampedTab == index,
+                    onClick = { onTabSelect(index) },
+                    text = {
+                        Text(
+                            text = title,
+                            style = MaterialTheme.typography.labelLarge,
+                            maxLines = 1,
+                            overflow = TextOverflow.Ellipsis
+                        )
+                    }
+                )
             }
+        }
 
-            when (selectedTab) {
+        Box(modifier = Modifier.fillMaxWidth().weight(1f, fill = false)) {
+            when (clampedTab) {
                 0 -> CharacterAndInventoryTab(
                     campaign = campaign,
                     palette = universePalette,

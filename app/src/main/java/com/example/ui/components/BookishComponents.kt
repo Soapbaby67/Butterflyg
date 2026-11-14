@@ -160,173 +160,159 @@ fun NpcEmotionCard(
 
     val category = EmotionCategory.fromKey(npc.emotionCategory)
     val (containerColor, contentColor) = emotionColorsFor(category)
+    val bubbleShape = RoundedCornerShape(
+        topStart = 20.dp,
+        topEnd = 20.dp,
+        bottomEnd = 20.dp,
+        bottomStart = 4.dp
+    )
 
-    Surface(
-        color = MaterialTheme.colorScheme.surface.copy(alpha = 0.88f),
-        shape = MaterialTheme.shapes.large,
-        border = BorderStroke(1.dp, contentColor.copy(alpha = 0.45f)),
-        tonalElevation = 4.dp,
-        shadowElevation = 4.dp,
+    Row(
+        verticalAlignment = Alignment.Bottom,
+        horizontalArrangement = Arrangement.spacedBy(10.dp),
         modifier = modifier
             .fillMaxWidth()
-            .then(
-                if (onClick != null) {
-                    Modifier
-                        .clip(MaterialTheme.shapes.large)
-                        .clickable(onClick = onClick)
-                } else {
-                    Modifier
-                }
-            )
             .testTag("npc_emotion_card")
     ) {
-        Column(
-            modifier = Modifier.padding(horizontal = 14.dp, vertical = 13.dp),
-            verticalArrangement = Arrangement.spacedBy(10.dp)
-        ) {
-            Row(
-                verticalAlignment = Alignment.Top,
-                horizontalArrangement = Arrangement.spacedBy(13.dp),
-                modifier = Modifier.fillMaxWidth()
-            ) {
-                NpcPortraitAvatar(
-                    name = npc.name,
-                    role = npcRelation?.role.orEmpty(),
-                    universe = universe,
-                    explicitArchetype = npcRelation?.archetype.orEmpty(),
-                    emotionCategory = npc.emotionCategory,
-                    intensity = npc.intensity,
-                    palette = palette,
-                    size = 66.dp
-                )
+        // Standalone messenger-style avatar anchored at bottom-left beside the bubble tail
+        NpcPortraitAvatar(
+            name = npc.name,
+            role = npcRelation?.role.orEmpty(),
+            universe = universe,
+            explicitArchetype = npcRelation?.archetype.orEmpty(),
+            emotionCategory = npc.emotionCategory,
+            intensity = npc.intensity,
+            palette = palette,
+            size = 54.dp,
+            modifier = Modifier.padding(bottom = 2.dp)
+        )
 
-                Column(
-                    modifier = Modifier.weight(1f),
-                    verticalArrangement = Arrangement.spacedBy(4.dp)
-                ) {
-                    Row(
-                        modifier = Modifier.fillMaxWidth(),
-                        horizontalArrangement = Arrangement.SpaceBetween,
-                        verticalAlignment = Alignment.CenterVertically
-                    ) {
-                        Text(
-                            text = npcRelation?.role?.takeIf { it.isNotBlank() } ?: "Собеседник в сцене",
-                            style = MaterialTheme.typography.labelSmall,
-                            color = palette.accentPrimary,
-                            maxLines = 1,
-                            overflow = TextOverflow.Ellipsis,
-                            modifier = Modifier.weight(1f)
-                        )
-                        // 5-dot emotion intensity meter
-                        Row(
-                            horizontalArrangement = Arrangement.spacedBy(3.dp),
-                            verticalAlignment = Alignment.CenterVertically
-                        ) {
-                            val level = npc.intensity.coerceIn(1L, 5L).toInt()
-                            for (idx in 1..5) {
-                                Box(
-                                    modifier = Modifier
-                                        .size(6.dp)
-                                        .clip(CircleShape)
-                                        .background(
-                                            if (idx <= level) contentColor else containerColor
-                                        )
-                                )
-                            }
-                        }
+        Surface(
+            color = MaterialTheme.colorScheme.surface.copy(alpha = 0.90f),
+            shape = bubbleShape,
+            border = BorderStroke(1.dp, contentColor.copy(alpha = 0.45f)),
+            tonalElevation = 4.dp,
+            shadowElevation = 5.dp,
+            modifier = Modifier
+                .weight(1f)
+                .then(
+                    if (onClick != null) {
+                        Modifier
+                            .clip(bubbleShape)
+                            .clickable(onClick = onClick)
+                    } else {
+                        Modifier
                     }
-
-                    Row(
-                        verticalAlignment = Alignment.CenterVertically,
-                        horizontalArrangement = Arrangement.spacedBy(8.dp),
-                        modifier = Modifier.fillMaxWidth()
-                    ) {
+                )
+        ) {
+            Column(
+                modifier = Modifier.padding(horizontal = 14.dp, vertical = 12.dp),
+                verticalArrangement = Arrangement.spacedBy(8.dp)
+            ) {
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.SpaceBetween,
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    Column(modifier = Modifier.weight(1f)) {
                         Text(
                             text = npc.name,
-                            style = MaterialTheme.typography.titleMedium,
+                            style = MaterialTheme.typography.titleSmall,
                             fontWeight = FontWeight.SemiBold,
                             color = MaterialTheme.colorScheme.onSurface,
                             maxLines = 1,
-                            overflow = TextOverflow.Ellipsis,
-                            modifier = Modifier.weight(1f, fill = false)
+                            overflow = TextOverflow.Ellipsis
                         )
-                        EmotionBadgeChip(
-                            emotionLabel = npc.emotionLabel,
-                            emotionCategory = npc.emotionCategory
+                        val roleText = npcRelation?.role?.takeIf { it.isNotBlank() } ?: "Собеседник в сцене"
+                        Text(
+                            text = roleText,
+                            style = MaterialTheme.typography.labelSmall,
+                            color = palette.accentPrimary,
+                            maxLines = 1,
+                            overflow = TextOverflow.Ellipsis
                         )
                     }
+                    Spacer(modifier = Modifier.width(6.dp))
+                    EmotionBadgeChip(
+                        emotionLabel = npc.emotionLabel,
+                        emotionCategory = npc.emotionCategory
+                    )
+                }
 
-                    if (npc.note.isNotBlank()) {
-                        Surface(
-                            color = MaterialTheme.colorScheme.background.copy(alpha = 0.55f),
-                            shape = MaterialTheme.shapes.small,
-                            border = BorderStroke(1.dp, contentColor.copy(alpha = 0.22f)),
-                            modifier = Modifier.fillMaxWidth()
-                        ) {
-                            Text(
-                                text = "«${npc.note}»",
-                                style = MaterialTheme.typography.bodySmall.copy(fontStyle = FontStyle.Italic),
-                                color = MaterialTheme.colorScheme.onSurface,
-                                modifier = Modifier.padding(horizontal = 10.dp, vertical = 7.dp)
+                if (npc.note.isNotBlank()) {
+                    Text(
+                        text = npc.note,
+                        style = MaterialTheme.typography.bodyMedium,
+                        color = MaterialTheme.colorScheme.onSurface
+                    )
+                }
+
+                // Intensity dots + Trust meter footer
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.spacedBy(8.dp)
+                ) {
+                    Row(
+                        horizontalArrangement = Arrangement.spacedBy(3.dp),
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        val level = npc.intensity.coerceIn(1L, 5L).toInt()
+                        for (idx in 1..5) {
+                            Box(
+                                modifier = Modifier
+                                    .size(5.dp)
+                                    .clip(CircleShape)
+                                    .background(
+                                        if (idx <= level) contentColor else containerColor
+                                    )
                             )
                         }
                     }
-                }
-            }
 
-            if (npcRelation != null) {
-                val trust = npcRelation.trustLevel.coerceIn(-100L, 100L)
-                val normalizedTrust = (trust + 100L) / 200f
-                val trustColor = when {
-                    trust >= 15L -> palette.trustPositive
-                    trust <= -15L -> palette.trustNegative
-                    else -> palette.accentSecondary
-                }
-                Row(
-                    verticalAlignment = Alignment.CenterVertically,
-                    horizontalArrangement = Arrangement.spacedBy(8.dp),
-                    modifier = Modifier.fillMaxWidth()
-                ) {
-                    Text(
-                        text = "Доверие: ${npcRelation.statusLabel.ifBlank { "Нейтрально" }}",
-                        style = MaterialTheme.typography.labelSmall,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant,
-                        maxLines = 1,
-                        overflow = TextOverflow.Ellipsis
-                    )
-                    LinearProgressIndicator(
-                        progress = { normalizedTrust },
-                        modifier = Modifier
-                            .weight(1f)
-                            .height(5.dp)
-                            .clip(RoundedCornerShape(999.dp)),
-                        color = trustColor,
-                        trackColor = MaterialTheme.colorScheme.outlineVariant
-                    )
-                    Text(
-                        text = if (trust > 0) "+$trust" else "$trust",
-                        style = MaterialTheme.typography.labelSmall,
-                        fontWeight = FontWeight.SemiBold,
-                        color = trustColor
-                    )
+                    if (npcRelation != null) {
+                        val trust = npcRelation.trustLevel.coerceIn(-100L, 100L)
+                        val normalizedTrust = (trust + 100L) / 200f
+                        val trustColor = when {
+                            trust >= 15L -> palette.trustPositive
+                            trust <= -15L -> palette.trustNegative
+                            else -> palette.accentSecondary
+                        }
+                        LinearProgressIndicator(
+                            progress = { normalizedTrust },
+                            modifier = Modifier
+                                .weight(1f)
+                                .height(4.dp)
+                                .clip(RoundedCornerShape(999.dp)),
+                            color = trustColor,
+                            trackColor = MaterialTheme.colorScheme.outlineVariant
+                        )
+                        Text(
+                            text = if (trust > 0) "+$trust" else "$trust",
+                            style = MaterialTheme.typography.labelSmall,
+                            fontWeight = FontWeight.SemiBold,
+                            color = trustColor
+                        )
+                    } else {
+                        Spacer(modifier = Modifier.weight(1f))
+                    }
                 }
 
-                if (npcRelation.boundaries.isNotBlank()) {
-                    Text(
-                        text = "Границы: ${npcRelation.boundaries}",
-                        style = MaterialTheme.typography.labelSmall,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant,
-                        maxLines = 2,
-                        overflow = TextOverflow.Ellipsis
-                    )
-                } else if (npcRelation.personality.isNotBlank()) {
-                    Text(
-                        text = "Характер: ${npcRelation.personality}",
-                        style = MaterialTheme.typography.labelSmall,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant,
-                        maxLines = 2,
-                        overflow = TextOverflow.Ellipsis
-                    )
+                if (npcRelation != null) {
+                    val detailText = when {
+                        npcRelation.boundaries.isNotBlank() -> "Границы: ${npcRelation.boundaries}"
+                        npcRelation.personality.isNotBlank() -> "Характер: ${npcRelation.personality}"
+                        else -> ""
+                    }
+                    if (detailText.isNotBlank()) {
+                        Text(
+                            text = detailText,
+                            style = MaterialTheme.typography.labelSmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                            maxLines = 2,
+                            overflow = TextOverflow.Ellipsis
+                        )
+                    }
                 }
             }
         }

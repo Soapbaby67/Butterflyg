@@ -415,7 +415,7 @@ class GameMasterAiRepository(
                 responseMimeType = "application/json"
                 responseSchema = turnResponseSchema
                 temperature = 0.85f
-                maxOutputTokens = 4096
+                maxOutputTokens = 8192
             },
             systemInstruction = systemPrompt
         )
@@ -428,7 +428,7 @@ class GameMasterAiRepository(
                 responseMimeType = "application/json"
                 responseSchema = turnResponseSchema
                 temperature = 0.85f
-                maxOutputTokens = 4096
+                maxOutputTokens = 8192
                 thinkingConfig = thinkingConfig {
                     thinkingLevel = ThinkingLevel.LOW
                 }
@@ -457,6 +457,7 @@ class GameMasterAiRepository(
             defaultTurnNumber = 1L,
             previousNpcs = emptyList(),
             preferredModel = preferredModel,
+            useStreaming = false,
             onStreamingNarrative = {}
         )
     }
@@ -549,6 +550,7 @@ class GameMasterAiRepository(
             defaultTurnNumber = campaign.turnCount + 1L,
             previousNpcs = campaign.npcs,
             preferredModel = preferredModel,
+            useStreaming = true,
             onStreamingNarrative = onStreamingNarrative
         )
     }
@@ -558,6 +560,7 @@ class GameMasterAiRepository(
         defaultTurnNumber: Long,
         previousNpcs: List<NpcRelation>,
         preferredModel: AiModelChoice,
+        useStreaming: Boolean = true,
         onStreamingNarrative: (String) -> Unit
     ): GmTurnOutcome {
         try {
@@ -565,15 +568,39 @@ class GameMasterAiRepository(
             val shouldUseFlash38 = preferredModel == AiModelChoice.FLASH_38 && now >= flash38CooldownUntilMs
 
             val jsonString = if (!shouldUseFlash38) {
-                streamModelJson(flashLiteModel, prompt, FLASH_LITE_TIMEOUT_MS, onStreamingNarrative)
+                fetchModelJson(
+                    targetModel = flashLiteModel,
+                    prompt = prompt,
+                    timeoutMs = FLASH_LITE_TIMEOUT_MS,
+                    useStreaming = useStreaming,
+                    defaultTurnNumber = defaultTurnNumber,
+                    previousNpcs = previousNpcs,
+                    onStreamingNarrative = onStreamingNarrative
+                )
             } else {
                 try {
-                    streamModelJson(flash38Model, prompt, FLASH_38_TIMEOUT_MS, onStreamingNarrative)
+                    fetchModelJson(
+                        targetModel = flash38Model,
+                        prompt = prompt,
+                        timeoutMs = FLASH_38_TIMEOUT_MS,
+                        useStreaming = useStreaming,
+                        defaultTurnNumber = defaultTurnNumber,
+                        previousNpcs = previousNpcs,
+                        onStreamingNarrative = onStreamingNarrative
+                    )
                 } catch (timeout: TimeoutCancellationException) {
                     Log.w(TAG, "gemini-3.8-flash timed out; switching to gemini-3.5-flash-lite", timeout)
                     flash38CooldownUntilMs = System.currentTimeMillis() + COOLDOWN_MS
                     onStreamingNarrative("")
-                    streamModelJson(flashLiteModel, prompt, FLASH_LITE_TIMEOUT_MS, onStreamingNarrative)
+                    fetchModelJson(
+                        targetModel = flashLiteModel,
+                        prompt = prompt,
+                        timeoutMs = FLASH_LITE_TIMEOUT_MS,
+                        useStreaming = useStreaming,
+                        defaultTurnNumber = defaultTurnNumber,
+                        previousNpcs = previousNpcs,
+                        onStreamingNarrative = onStreamingNarrative
+                    )
                 } catch (e: CancellationException) {
                     throw e
                 } catch (e: Exception) {
@@ -581,7 +608,15 @@ class GameMasterAiRepository(
                         Log.w(TAG, "gemini-3.8-flash hit quota/rate-limit; switching to gemini-3.5-flash-lite", e)
                         flash38CooldownUntilMs = System.currentTimeMillis() + COOLDOWN_MS
                         onStreamingNarrative("")
-                        streamModelJson(flashLiteModel, prompt, FLASH_LITE_TIMEOUT_MS, onStreamingNarrative)
+                        fetchModelJson(
+                            targetModel = flashLiteModel,
+                            prompt = prompt,
+                            timeoutMs = FLASH_LITE_TIMEOUT_MS,
+                            useStreaming = useStreaming,
+                            defaultTurnNumber = defaultTurnNumber,
+                            previousNpcs = previousNpcs,
+                            onStreamingNarrative = onStreamingNarrative
+                        )
                     } else {
                         throw e
                     }
@@ -599,11 +634,11 @@ class GameMasterAiRepository(
             throw e
         } catch (e: Exception) {
             Log.e(TAG, "Firebase AI generation failed", e)
-            val rawMessage = e.localizedMessage ?: "Не удалось получить ответ от ИИ-мастера."
+            val detailedMessage = extractDetailedErrorMessage(e)
             val debugToken = if (
-                rawMessage.contains("App Check", ignoreCase = true) ||
-                rawMessage.contains("token is invalid", ignoreCase = true) ||
-                rawMessage.contains("403", ignoreCase = true)
+                detailedMessage.contains("App Check", ignoreCase = true) ||
+                detailedMessage.contains("token is invalid", ignoreCase = true) ||
+                detailedMessage.contains("403", ignoreCase = true)
             ) {
                 debugTokenProvider()
             } else {
@@ -611,13 +646,33 @@ class GameMasterAiRepository(
             }
             val finalMessage = when {
                 !debugToken.isNullOrBlank() ->
-                    "$rawMessage\n\nDebug-токен этого телефона:\n$debugToken\n\nДобавьте его в Firebase Console → App Check → Apps → Manage debug tokens."
+                    "$detailedMessage\n\nDebug-токен этого телефона:\n$debugToken\n\nДобавьте его в Firebase Console → App Check → Apps → Manage debug tokens."
                 isQuotaOrRateLimitError(e) ->
-                    formatQuotaErrorMessage(rawMessage)
-                else -> rawMessage
+                    formatQuotaErrorMessage(detailedMessage)
+                else -> detailedMessage
             }
             throw IllegalStateException(finalMessage, e)
         }
+    }
+
+    internal fun extractDetailedErrorMessage(error: Throwable): String {
+        val messages = generateSequence(error) { it.cause }
+            .mapNotNull { it.localizedMessage ?: it.message }
+            .map { it.trim() }
+            .filter { it.isNotBlank() }
+            .distinct()
+            .toList()
+        val meaningful = messages.firstOrNull { !it.equals("Something unexpected happened.", ignoreCase = true) }
+        return meaningful ?: messages.firstOrNull() ?: "Не удалось получить ответ от ИИ-мастера."
+    }
+
+    private fun isAppCheckError(error: Throwable): Boolean {
+        val all = generateSequence(error) { it.cause }
+            .mapNotNull { it.message ?: it.localizedMessage }
+            .joinToString(" ")
+        return all.contains("App Check", ignoreCase = true) ||
+            all.contains("token is invalid", ignoreCase = true) ||
+            all.contains("403", ignoreCase = true)
     }
 
     private fun isQuotaOrRateLimitError(error: Throwable): Boolean {
@@ -641,22 +696,61 @@ class GameMasterAiRepository(
         }
     }
 
-    private suspend fun streamModelJson(
+    private suspend fun fetchModelJson(
         targetModel: GenerativeModel,
         prompt: String,
         timeoutMs: Long,
+        useStreaming: Boolean,
+        defaultTurnNumber: Long,
+        previousNpcs: List<NpcRelation>,
         onStreamingNarrative: (String) -> Unit
-    ): String = withTimeout(timeoutMs) {
+    ): String {
+        if (!useStreaming) {
+            return generateUnaryJson(targetModel, prompt, timeoutMs)
+        }
+
         val builder = StringBuilder()
         val extractor = StreamingNarrativeExtractor()
-        targetModel.generateContentStream(prompt).collect { chunk ->
-            val chunkText = chunk.text ?: return@collect
-            builder.append(chunkText)
-            extractor.append(chunkText)?.let { partialNarrative ->
-                onStreamingNarrative(partialNarrative)
+        return try {
+            withTimeout(timeoutMs) {
+                targetModel.generateContentStream(prompt).collect { chunk ->
+                    val chunkText = chunk.text ?: return@collect
+                    builder.append(chunkText)
+                    extractor.append(chunkText)?.let { partialNarrative ->
+                        onStreamingNarrative(partialNarrative)
+                    }
+                }
+                builder.toString().trim()
             }
+        } catch (e: TimeoutCancellationException) {
+            throw e
+        } catch (e: CancellationException) {
+            throw e
+        } catch (streamError: Exception) {
+            // Preserve quota and App Check errors directly without duplicate retries
+            if (isQuotaOrRateLimitError(streamError) || isAppCheckError(streamError)) {
+                throw streamError
+            }
+            // If SSE failed right at the end after full JSON already arrived, salvage it immediately
+            val accumulated = builder.toString().trim()
+            if (accumulated.isNotBlank() &&
+                runCatching { parseTurnOutcome(accumulated, defaultTurnNumber, previousNpcs) }.isSuccess
+            ) {
+                Log.w(TAG, "Stream threw at EOF after valid JSON arrived; using accumulated response", streamError)
+                return accumulated
+            }
+            // Otherwise seamlessly fall back to unary generateContent to bypass SSE chunk decoding issues
+            Log.w(TAG, "Streaming failed (${extractDetailedErrorMessage(streamError)}); falling back to unary generateContent", streamError)
+            generateUnaryJson(targetModel, prompt, timeoutMs)
         }
-        builder.toString().trim()
+    }
+
+    private suspend fun generateUnaryJson(
+        targetModel: GenerativeModel,
+        prompt: String,
+        timeoutMs: Long
+    ): String = withTimeout(timeoutMs) {
+        targetModel.generateContent(prompt).text.orEmpty().trim()
     }
 
     private fun parseTurnOutcome(
@@ -847,8 +941,8 @@ class GameMasterAiRepository(
 
     private companion object {
         const val TAG = "GameMasterAiRepo"
-        const val FLASH_38_TIMEOUT_MS = 20_000L
-        const val FLASH_LITE_TIMEOUT_MS = 35_000L
+        const val FLASH_38_TIMEOUT_MS = 35_000L
+        const val FLASH_LITE_TIMEOUT_MS = 55_000L
         const val COOLDOWN_MS = 120_000L
     }
 }

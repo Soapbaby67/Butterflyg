@@ -59,6 +59,41 @@ fun StatsAndInventorySheet(
     onDismiss: () -> Unit
 ) {
     val sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true)
+
+    ModalBottomSheet(
+        onDismissRequest = onDismiss,
+        sheetState = sheetState,
+        containerColor = MaterialTheme.colorScheme.surface,
+        contentColor = MaterialTheme.colorScheme.onSurface
+    ) {
+        StatsAndInventoryContent(
+            campaign = campaign,
+            stats = stats,
+            palette = palette,
+            onItemClick = { itemName ->
+                onDismiss()
+                onItemClick(itemName)
+            },
+            onOpenCodex = {
+                onDismiss()
+                onOpenCodex()
+            },
+            modifier = Modifier
+                .fillMaxWidth()
+                .navigationBarsPadding()
+        )
+    }
+}
+
+@Composable
+fun StatsAndInventoryContent(
+    campaign: Campaign,
+    stats: ParsedHudStats,
+    palette: UniverseVisualPalette,
+    onItemClick: (String) -> Unit,
+    onOpenCodex: () -> Unit,
+    modifier: Modifier = Modifier
+) {
     val healthFraction by animateFloatAsState(
         targetValue = stats.healthPercent.coerceIn(0, 100) / 100f,
         animationSpec = spring(),
@@ -75,40 +110,34 @@ fun StatsAndInventorySheet(
         else -> palette.healthLow
     }
 
-    ModalBottomSheet(
-        onDismissRequest = onDismiss,
-        sheetState = sheetState,
-        containerColor = MaterialTheme.colorScheme.surface,
-        contentColor = MaterialTheme.colorScheme.onSurface
+    LazyColumn(
+        modifier = modifier
+            .fillMaxWidth()
+            .testTag("stats_inventory_sheet"),
+        contentPadding = PaddingValues(horizontal = 16.dp, vertical = 12.dp),
+        verticalArrangement = Arrangement.spacedBy(12.dp)
     ) {
-        LazyColumn(
-            modifier = Modifier
-                .fillMaxWidth()
-                .navigationBarsPadding()
-                .testTag("stats_inventory_sheet"),
-            contentPadding = PaddingValues(horizontal = 20.dp, vertical = 8.dp),
-            verticalArrangement = Arrangement.spacedBy(14.dp)
-        ) {
-            item {
-                Row(
-                    modifier = Modifier.fillMaxWidth(),
-                    horizontalArrangement = Arrangement.SpaceBetween,
-                    verticalAlignment = Alignment.CenterVertically
-                ) {
-                    Column(modifier = Modifier.weight(1f)) {
-                        Text(
-                            text = "Статистика и снаряжение",
-                            style = MaterialTheme.typography.headlineSmall,
-                            fontWeight = FontWeight.SemiBold
-                        )
-                        Text(
-                            text = "Ход ${campaign.turnCount} • ${campaign.universe}",
-                            style = MaterialTheme.typography.bodySmall,
-                            color = palette.accentPrimary,
-                            maxLines = 1,
-                            overflow = TextOverflow.Ellipsis
-                        )
-                    }
+        item {
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.SpaceBetween,
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                Column(modifier = Modifier.weight(1f)) {
+                    Text(
+                        text = "Статистика и снаряжение",
+                        style = MaterialTheme.typography.headlineSmall,
+                        fontWeight = FontWeight.SemiBold,
+                        color = MaterialTheme.colorScheme.onSurface
+                    )
+                    Text(
+                        text = "Ход ${campaign.turnCount} • ${campaign.universe}",
+                        style = MaterialTheme.typography.bodySmall,
+                        color = palette.accentPrimary,
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis
+                    )
+                }
                     Surface(
                         color = palette.accentPrimary.copy(alpha = 0.14f),
                         shape = RoundedCornerShape(999.dp),
@@ -357,7 +386,6 @@ fun StatsAndInventorySheet(
                                                 .weight(1f)
                                                 .clip(MaterialTheme.shapes.medium)
                                                 .clickable {
-                                                    onDismiss()
                                                     onItemClick(itemName)
                                                 }
                                         ) {
@@ -402,10 +430,7 @@ fun StatsAndInventorySheet(
 
             item {
                 FilledTonalButton(
-                    onClick = {
-                        onDismiss()
-                        onOpenCodex()
-                    },
+                    onClick = onOpenCodex,
                     modifier = Modifier
                         .fillMaxWidth()
                         .height(48.dp)
@@ -426,4 +451,3 @@ fun StatsAndInventorySheet(
             }
         }
     }
-}

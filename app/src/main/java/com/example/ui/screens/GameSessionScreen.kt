@@ -1,5 +1,6 @@
 package com.example.ui.screens
 
+import androidx.activity.compose.BackHandler
 import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.animation.Crossfade
 import androidx.compose.animation.core.tween
@@ -32,6 +33,8 @@ import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.LazyRow
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.lazy.rememberLazyListState
+import androidx.compose.foundation.pager.HorizontalPager
+import androidx.compose.foundation.pager.rememberPagerState
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.KeyboardActions
 import androidx.compose.foundation.text.KeyboardOptions
@@ -43,6 +46,8 @@ import androidx.compose.material.icons.automirrored.outlined.MenuBook
 import androidx.compose.material.icons.outlined.Analytics
 import androidx.compose.material.icons.outlined.AutoAwesome
 import androidx.compose.material.icons.outlined.Bolt
+import androidx.compose.material.icons.outlined.ChevronLeft
+import androidx.compose.material.icons.outlined.ChevronRight
 import androidx.compose.material.icons.outlined.EditNote
 import androidx.compose.material.icons.outlined.ExpandLess
 import androidx.compose.material.icons.outlined.ExpandMore
@@ -81,6 +86,7 @@ import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
@@ -112,7 +118,7 @@ import com.example.ui.components.HudStatsParser
 import com.example.ui.components.ItemActionSheet
 import com.example.ui.components.ItemPictureTile
 import com.example.ui.components.NpcEmotionCard
-import com.example.ui.components.StatsAndInventorySheet
+import com.example.ui.components.StatsAndInventoryContent
 import com.example.ui.components.WeatherCanvasOverlay
 import com.example.ui.components.weatherIconFor
 import com.example.ui.theme.AppVisualLocation
@@ -127,6 +133,7 @@ import com.example.ui.viewmodel.GameSessionData
 import com.example.ui.viewmodel.GameSessionViewModel
 import com.example.ui.viewmodel.TurnSubmissionState
 import com.example.ui.viewmodel.UiState
+import kotlinx.coroutines.launch
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -143,12 +150,21 @@ fun GameSessionScreen(
     val haptics = rememberRpgHaptics(hapticsEnabled)
 
     var customActionText by rememberSaveable { mutableStateOf("") }
-    var showCodex by remember { mutableStateOf(false) }
-    var showStatsSheet by remember { mutableStateOf(false) }
     var showHistoryTurns by rememberSaveable { mutableStateOf(false) }
-    var codexInitialTab by remember { mutableIntStateOf(0) }
+    var codexTab by rememberSaveable { mutableIntStateOf(0) }
     var selectedItemForAction by remember { mutableStateOf<String?>(null) }
     val listState = rememberLazyListState()
+    val coroutineScope = rememberCoroutineScope()
+    // Page 0 = Stats & Inventory (swipe right from center)
+    // Page 1 = Active Scene & Messenger Chat (default center)
+    // Page 2 = Codex, NPCs, Butterfly & Facts (swipe left from center)
+    val pagerState = rememberPagerState(initialPage = 1, pageCount = { 3 })
+
+    BackHandler(enabled = pagerState.currentPage != 1) {
+        coroutineScope.launch {
+            pagerState.animateScrollToPage(1)
+        }
+    }
 
     val successData = (sessionState as? UiState.Success<GameSessionData>)?.data
     val universePalette = rememberUniverseVisualPalette(
@@ -269,14 +285,24 @@ fun GameSessionScreen(
                     ),
                     navigationIcon = {
                         IconButton(
-                            onClick = onBack,
+                            onClick = {
+                                if (pagerState.currentPage != 1) {
+                                    coroutineScope.launch { pagerState.animateScrollToPage(1) }
+                                } else {
+                                    onBack()
+                                }
+                            },
                             modifier = Modifier
                                 .minimumInteractiveComponentSize()
                                 .testTag("session_back_button")
                         ) {
                             Icon(
                                 imageVector = Icons.AutoMirrored.Filled.ArrowBack,
-                                contentDescription = "Назад к полке хроник"
+                                contentDescription = if (pagerState.currentPage != 1) {
+                                    "Вернуться к сцене"
+                                } else {
+                                    "Назад к полке хроник"
+                                }
                             )
                         }
                     },
@@ -305,7 +331,11 @@ fun GameSessionScreen(
                             IconButton(
                                 onClick = {
                                     haptics.tap()
-                                    showStatsSheet = true
+                                    coroutineScope.launch {
+                                        pagerState.animateScrollToPage(
+                                            if (pagerState.currentPage == 0) 1 else 0
+                                        )
+                                    }
                                 },
                                 modifier = Modifier
                                     .minimumInteractiveComponentSize()
@@ -313,15 +343,19 @@ fun GameSessionScreen(
                             ) {
                                 Icon(
                                     imageVector = Icons.Outlined.Analytics,
-                                    contentDescription = "Открыть статистику и инвентарь",
-                                    tint = dynamicSpec.accentSecondary
+                                    contentDescription = "Статистика и инвентарь (свайп вправо)",
+                                    tint = if (pagerState.currentPage == 0) {
+                                        dynamicSpec.accentSecondary
+                                    } else {
+                                        MaterialTheme.colorScheme.onBackground
+                                    }
                                 )
                             }
                             IconButton(
                                 onClick = {
                                     haptics.tap()
-                                    codexInitialTab = 3
-                                    showCodex = true
+                                    codexTab = 3
+                                    coroutineScope.launch { pagerState.animateScrollToPage(2) }
                                 },
                                 modifier = Modifier
                                     .minimumInteractiveComponentSize()
@@ -330,7 +364,9 @@ fun GameSessionScreen(
                                 Icon(
                                     imageVector = Icons.Outlined.EditNote,
                                     contentDescription = "Блокнот фактов (${facts.count { it.isPinned }})",
-                                    tint = if (facts.any { it.isPinned }) {
+                                    tint = if (pagerState.currentPage == 2 && codexTab == 3) {
+                                        dynamicSpec.accentPrimary
+                                    } else if (facts.any { it.isPinned }) {
                                         dynamicSpec.accentPrimary
                                     } else {
                                         MaterialTheme.colorScheme.onBackground
@@ -340,8 +376,12 @@ fun GameSessionScreen(
                             IconButton(
                                 onClick = {
                                     haptics.tap()
-                                    codexInitialTab = 0
-                                    showCodex = true
+                                    if (pagerState.currentPage == 2) {
+                                        coroutineScope.launch { pagerState.animateScrollToPage(1) }
+                                    } else {
+                                        codexTab = 0
+                                        coroutineScope.launch { pagerState.animateScrollToPage(2) }
+                                    }
                                 },
                                 modifier = Modifier
                                     .minimumInteractiveComponentSize()
@@ -349,7 +389,12 @@ fun GameSessionScreen(
                             ) {
                                 Icon(
                                     imageVector = Icons.AutoMirrored.Outlined.MenuBook,
-                                    contentDescription = "Открыть Кодекс хроники"
+                                    contentDescription = "Кодекс хроники (свайп влево)",
+                                    tint = if (pagerState.currentPage == 2) {
+                                        dynamicSpec.accentPrimary
+                                    } else {
+                                        MaterialTheme.colorScheme.onBackground
+                                    }
                                 )
                             }
                         }
@@ -371,161 +416,167 @@ fun GameSessionScreen(
                 )
             },
             bottomBar = {
-                if (successData != null) {
-                    Surface(
-                        color = MaterialTheme.colorScheme.surface.copy(alpha = 0.90f),
-                        tonalElevation = 6.dp,
-                        border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant)
-                    ) {
-                        Column(
-                            modifier = Modifier
-                                .fillMaxWidth()
-                                .navigationBarsPadding()
-                                .imePadding()
-                                .padding(horizontal = 14.dp, vertical = 10.dp),
-                            horizontalAlignment = Alignment.CenterHorizontally
+                AnimatedVisibility(
+                    visible = successData != null && pagerState.currentPage == 1,
+                    enter = expandVertically() + fadeIn(),
+                    exit = shrinkVertically() + fadeOut()
+                ) {
+                    if (successData != null) {
+                        Surface(
+                            color = MaterialTheme.colorScheme.surface.copy(alpha = 0.90f),
+                            tonalElevation = 6.dp,
+                            border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant)
                         ) {
-                            AnimatedVisibility(visible = submissionState is TurnSubmissionState.Error) {
-                                val err = submissionState as? TurnSubmissionState.Error
-                                if (err != null) {
-                                    Surface(
-                                        color = MaterialTheme.colorScheme.error.copy(alpha = 0.14f),
-                                        shape = MaterialTheme.shapes.small,
+                            Column(
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .navigationBarsPadding()
+                                    .imePadding()
+                                    .padding(horizontal = 14.dp, vertical = 10.dp),
+                                horizontalAlignment = Alignment.CenterHorizontally
+                            ) {
+                                AnimatedVisibility(visible = submissionState is TurnSubmissionState.Error) {
+                                    val err = submissionState as? TurnSubmissionState.Error
+                                    if (err != null) {
+                                        Surface(
+                                            color = MaterialTheme.colorScheme.error.copy(alpha = 0.14f),
+                                            shape = MaterialTheme.shapes.small,
+                                            modifier = Modifier
+                                                .fillMaxWidth()
+                                                .widthIn(max = 680.dp)
+                                                .padding(bottom = 8.dp)
+                                        ) {
+                                            Row(
+                                                modifier = Modifier.padding(horizontal = 12.dp, vertical = 8.dp),
+                                                verticalAlignment = Alignment.CenterVertically,
+                                                horizontalArrangement = Arrangement.SpaceBetween
+                                            ) {
+                                                SelectionContainer(modifier = Modifier.weight(1f)) {
+                                                    Text(
+                                                        text = err.message,
+                                                        style = MaterialTheme.typography.bodySmall,
+                                                        color = MaterialTheme.colorScheme.error
+                                                    )
+                                                }
+                                                TextButton(
+                                                    onClick = {
+                                                        haptics.tap()
+                                                        viewModel.submitPlayerAction(err.failedAction)
+                                                    }
+                                                ) {
+                                                    Icon(
+                                                        imageVector = Icons.Outlined.Refresh,
+                                                        contentDescription = null,
+                                                        modifier = Modifier.size(16.dp)
+                                                    )
+                                                    Spacer(modifier = Modifier.width(4.dp))
+                                                    Text("Повторить")
+                                                }
+                                            }
+                                        }
+                                    }
+                                }
+
+                                // Real-time interactive Visual Inventory Tray
+                                val inventoryItems = successData.campaign.inventory
+                                if (inventoryItems.isNotEmpty() && submissionState !is TurnSubmissionState.Generating) {
+                                    LazyRow(
                                         modifier = Modifier
                                             .fillMaxWidth()
                                             .widthIn(max = 680.dp)
                                             .padding(bottom = 8.dp)
+                                            .testTag("quick_inventory_tray"),
+                                        horizontalArrangement = Arrangement.spacedBy(8.dp)
                                     ) {
-                                        Row(
-                                            modifier = Modifier.padding(horizontal = 12.dp, vertical = 8.dp),
-                                            verticalAlignment = Alignment.CenterVertically,
-                                            horizontalArrangement = Arrangement.SpaceBetween
-                                        ) {
-                                            SelectionContainer(modifier = Modifier.weight(1f)) {
-                                                Text(
-                                                    text = err.message,
-                                                    style = MaterialTheme.typography.bodySmall,
-                                                    color = MaterialTheme.colorScheme.error
-                                                )
-                                            }
-                                            TextButton(
-                                                onClick = {
-                                                    haptics.tap()
-                                                    viewModel.submitPlayerAction(err.failedAction)
-                                                }
+                                        items(inventoryItems) { item ->
+                                            Surface(
+                                                color = MaterialTheme.colorScheme.background.copy(alpha = 0.72f),
+                                                shape = MaterialTheme.shapes.medium,
+                                                border = BorderStroke(1.dp, dynamicSpec.accentPrimary.copy(alpha = 0.36f)),
+                                                modifier = Modifier
+                                                    .clip(MaterialTheme.shapes.medium)
+                                                    .clickable {
+                                                        haptics.tap()
+                                                        selectedItemForAction = item
+                                                    }
                                             ) {
-                                                Icon(
-                                                    imageVector = Icons.Outlined.Refresh,
-                                                    contentDescription = null,
-                                                    modifier = Modifier.size(16.dp)
-                                                )
-                                                Spacer(modifier = Modifier.width(4.dp))
-                                                Text("Повторить")
+                                                Row(
+                                                    verticalAlignment = Alignment.CenterVertically,
+                                                    horizontalArrangement = Arrangement.spacedBy(7.dp),
+                                                    modifier = Modifier.padding(start = 5.dp, end = 10.dp, top = 4.dp, bottom = 4.dp)
+                                                ) {
+                                                    ItemPictureTile(
+                                                        itemName = item,
+                                                        palette = universePalette,
+                                                        size = 26.dp
+                                                    )
+                                                    Text(
+                                                        text = item,
+                                                        style = MaterialTheme.typography.labelSmall,
+                                                        color = MaterialTheme.colorScheme.onSurface,
+                                                        maxLines = 1,
+                                                        overflow = TextOverflow.Ellipsis
+                                                    )
+                                                }
                                             }
                                         }
                                     }
                                 }
-                            }
 
-                            // Real-time interactive Visual Inventory Tray (every item has its own picture!)
-                            val inventoryItems = successData.campaign.inventory
-                            if (inventoryItems.isNotEmpty() && submissionState !is TurnSubmissionState.Generating) {
-                                LazyRow(
+                                Row(
+                                    verticalAlignment = Alignment.CenterVertically,
+                                    horizontalArrangement = Arrangement.spacedBy(8.dp),
                                     modifier = Modifier
                                         .fillMaxWidth()
                                         .widthIn(max = 680.dp)
-                                        .padding(bottom = 8.dp)
-                                        .testTag("quick_inventory_tray"),
-                                    horizontalArrangement = Arrangement.spacedBy(8.dp)
                                 ) {
-                                    items(inventoryItems) { item ->
-                                        Surface(
-                                            color = MaterialTheme.colorScheme.background.copy(alpha = 0.72f),
-                                            shape = MaterialTheme.shapes.medium,
-                                            border = BorderStroke(1.dp, dynamicSpec.accentPrimary.copy(alpha = 0.36f)),
-                                            modifier = Modifier
-                                                .clip(MaterialTheme.shapes.medium)
-                                                .clickable {
+                                    OutlinedTextField(
+                                        value = customActionText,
+                                        onValueChange = { customActionText = it },
+                                        placeholder = { Text(stringResource(R.string.custom_action_hint)) },
+                                        enabled = submissionState !is TurnSubmissionState.Generating,
+                                        maxLines = 3,
+                                        colors = OutlinedTextFieldDefaults.colors(
+                                            focusedContainerColor = MaterialTheme.colorScheme.background.copy(alpha = 0.55f),
+                                            unfocusedContainerColor = MaterialTheme.colorScheme.background.copy(alpha = 0.42f)
+                                        ),
+                                        keyboardOptions = KeyboardOptions(imeAction = ImeAction.Send),
+                                        keyboardActions = KeyboardActions(
+                                            onSend = {
+                                                if (customActionText.isNotBlank()) {
                                                     haptics.tap()
-                                                    selectedItemForAction = item
+                                                    val text = customActionText
+                                                    customActionText = ""
+                                                    viewModel.submitPlayerAction(text)
                                                 }
-                                        ) {
-                                            Row(
-                                                verticalAlignment = Alignment.CenterVertically,
-                                                horizontalArrangement = Arrangement.spacedBy(7.dp),
-                                                modifier = Modifier.padding(start = 5.dp, end = 10.dp, top = 4.dp, bottom = 4.dp)
-                                            ) {
-                                                ItemPictureTile(
-                                                    itemName = item,
-                                                    palette = universePalette,
-                                                    size = 26.dp
-                                                )
-                                                Text(
-                                                    text = item,
-                                                    style = MaterialTheme.typography.labelSmall,
-                                                    color = MaterialTheme.colorScheme.onSurface,
-                                                    maxLines = 1,
-                                                    overflow = TextOverflow.Ellipsis
-                                                )
                                             }
-                                        }
-                                    }
-                                }
-                            }
-
-                            Row(
-                                verticalAlignment = Alignment.CenterVertically,
-                                horizontalArrangement = Arrangement.spacedBy(8.dp),
-                                modifier = Modifier
-                                    .fillMaxWidth()
-                                    .widthIn(max = 680.dp)
-                            ) {
-                                OutlinedTextField(
-                                    value = customActionText,
-                                    onValueChange = { customActionText = it },
-                                    placeholder = { Text(stringResource(R.string.custom_action_hint)) },
-                                    enabled = submissionState !is TurnSubmissionState.Generating,
-                                    maxLines = 3,
-                                    colors = OutlinedTextFieldDefaults.colors(
-                                        focusedContainerColor = MaterialTheme.colorScheme.background.copy(alpha = 0.55f),
-                                        unfocusedContainerColor = MaterialTheme.colorScheme.background.copy(alpha = 0.42f)
-                                    ),
-                                    keyboardOptions = KeyboardOptions(imeAction = ImeAction.Send),
-                                    keyboardActions = KeyboardActions(
-                                        onSend = {
-                                            if (customActionText.isNotBlank()) {
-                                                haptics.tap()
-                                                val text = customActionText
-                                                customActionText = ""
-                                                viewModel.submitPlayerAction(text)
-                                            }
-                                        }
-                                    ),
-                                    modifier = Modifier
-                                        .weight(1f)
-                                        .testTag("custom_action_input")
-                                )
-                                FilledIconButton(
-                                    onClick = {
-                                        haptics.tap()
-                                        val text = customActionText
-                                        customActionText = ""
-                                        viewModel.submitPlayerAction(text)
-                                    },
-                                    enabled = customActionText.isNotBlank() &&
-                                        submissionState !is TurnSubmissionState.Generating,
-                                    colors = IconButtonDefaults.filledIconButtonColors(
-                                        containerColor = dynamicSpec.accentPrimary,
-                                        contentColor = MaterialTheme.colorScheme.onPrimary
-                                    ),
-                                    modifier = Modifier
-                                        .size(50.dp)
-                                        .testTag("send_custom_action_button")
-                                ) {
-                                    Icon(
-                                        imageVector = Icons.AutoMirrored.Filled.Send,
-                                        contentDescription = stringResource(R.string.send_action)
+                                        ),
+                                        modifier = Modifier
+                                            .weight(1f)
+                                            .testTag("custom_action_input")
                                     )
+                                    FilledIconButton(
+                                        onClick = {
+                                            haptics.tap()
+                                            val text = customActionText
+                                            customActionText = ""
+                                            viewModel.submitPlayerAction(text)
+                                        },
+                                        enabled = customActionText.isNotBlank() &&
+                                            submissionState !is TurnSubmissionState.Generating,
+                                        colors = IconButtonDefaults.filledIconButtonColors(
+                                            containerColor = dynamicSpec.accentPrimary,
+                                            contentColor = MaterialTheme.colorScheme.onPrimary
+                                        ),
+                                        modifier = Modifier
+                                            .size(50.dp)
+                                            .testTag("send_custom_action_button")
+                                    ) {
+                                        Icon(
+                                            imageVector = Icons.AutoMirrored.Filled.Send,
+                                            contentDescription = stringResource(R.string.send_action)
+                                        )
+                                    }
                                 }
                             }
                         }
@@ -585,176 +636,302 @@ fun GameSessionScreen(
                             }
                         }
 
-                        LazyColumn(
-                            state = listState,
-                            contentPadding = PaddingValues(
-                                start = 14.dp,
-                                end = 14.dp,
-                                top = 8.dp,
-                                bottom = 22.dp
-                            ),
-                            verticalArrangement = Arrangement.spacedBy(12.dp),
-                            modifier = Modifier
-                                .fillMaxSize()
-                                .widthIn(max = 720.dp)
+                        Column(
+                            modifier = Modifier.fillMaxSize(),
+                            horizontalAlignment = Alignment.CenterHorizontally
                         ) {
-                            // 1. Slim atmospheric Scene Pill + Quick Action Buttons for Stats & Codex
-                            item(key = "scene_location_strip") {
-                                SceneStatusBarStrip(
-                                    location = data.campaign.hudLocation,
-                                    timeLabel = data.campaign.hudTime,
-                                    weatherMood = stats.weatherMood,
-                                    healthPercent = stats.healthPercent,
-                                    accentColor = dynamicSpec.accentPrimary,
-                                    secondaryColor = dynamicSpec.accentSecondary,
-                                    onInspectScene = {
-                                        if (generatingState == null && customActionText.isBlank()) {
-                                            haptics.tap()
-                                            customActionText = "Осмотреться вокруг (${data.campaign.hudLocation.ifBlank { "в сцене" }}): "
-                                        }
-                                    },
-                                    onOpenStats = {
-                                        haptics.tap()
-                                        showStatsSheet = true
+                            // Subtle 3-page swipe cue & tap navigator
+                            SwipeNavigationStrip(
+                                currentPage = pagerState.currentPage,
+                                accentColor = dynamicSpec.accentPrimary,
+                                secondaryColor = dynamicSpec.accentSecondary,
+                                onSelectPage = { page ->
+                                    haptics.tap()
+                                    coroutineScope.launch {
+                                        pagerState.animateScrollToPage(page)
                                     }
-                                )
-                            }
+                                },
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .widthIn(max = 720.dp)
+                                    .padding(horizontal = 14.dp, vertical = 6.dp)
+                            )
 
-                            // 2. Collapsible Previous Chapters Drawer (keeps focus on the active scene window)
-                            if (earlierTurns.isNotEmpty()) {
-                                item(key = "earlier_chapters_toggle") {
-                                    Surface(
-                                        color = MaterialTheme.colorScheme.surface.copy(alpha = 0.72f),
-                                        shape = MaterialTheme.shapes.medium,
-                                        border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant),
-                                        modifier = Modifier
-                                            .fillMaxWidth()
-                                            .clip(MaterialTheme.shapes.medium)
-                                            .clickable {
-                                                haptics.tap()
-                                                showHistoryTurns = !showHistoryTurns
-                                            }
-                                            .testTag("toggle_history_chapters")
-                                    ) {
-                                        Row(
-                                            modifier = Modifier.padding(horizontal = 14.dp, vertical = 10.dp),
-                                            verticalAlignment = Alignment.CenterVertically,
-                                            horizontalArrangement = Arrangement.SpaceBetween
+                            HorizontalPager(
+                                state = pagerState,
+                                beyondViewportPageCount = 1,
+                                modifier = Modifier
+                                    .fillMaxSize()
+                                    .testTag("game_horizontal_pager")
+                            ) { page ->
+                                when (page) {
+                                    // Swipe Right -> Left Page: Stats, Status & Visual Inventory
+                                    0 -> {
+                                        Box(
+                                            modifier = Modifier.fillMaxSize(),
+                                            contentAlignment = Alignment.TopCenter
                                         ) {
-                                            Row(
-                                                verticalAlignment = Alignment.CenterVertically,
-                                                horizontalArrangement = Arrangement.spacedBy(8.dp)
+                                            Surface(
+                                                color = MaterialTheme.colorScheme.surface.copy(alpha = 0.84f),
+                                                shape = MaterialTheme.shapes.large,
+                                                border = BorderStroke(1.dp, dynamicSpec.accentSecondary.copy(alpha = 0.34f)),
+                                                modifier = Modifier
+                                                    .fillMaxSize()
+                                                    .widthIn(max = 720.dp)
+                                                    .padding(horizontal = 12.dp, vertical = 6.dp)
                                             ) {
-                                                Icon(
-                                                    imageVector = Icons.Outlined.History,
-                                                    contentDescription = null,
-                                                    tint = dynamicSpec.accentSecondary,
-                                                    modifier = Modifier.size(16.dp)
-                                                )
-                                                Text(
-                                                    text = if (showHistoryTurns) {
-                                                        "Скрыть прошлые главы (${earlierTurns.size})"
-                                                    } else {
-                                                        "Прошлые главы (${earlierTurns.size})"
+                                                StatsAndInventoryContent(
+                                                    campaign = data.campaign,
+                                                    stats = stats,
+                                                    palette = universePalette,
+                                                    onItemClick = { item ->
+                                                        haptics.tap()
+                                                        selectedItemForAction = item
                                                     },
-                                                    style = MaterialTheme.typography.labelMedium,
-                                                    color = MaterialTheme.colorScheme.onSurface
-                                                )
-                                            }
-                                            Icon(
-                                                imageVector = if (showHistoryTurns) {
-                                                    Icons.Outlined.ExpandLess
-                                                } else {
-                                                    Icons.Outlined.ExpandMore
-                                                },
-                                                contentDescription = null,
-                                                tint = MaterialTheme.colorScheme.onSurfaceVariant,
-                                                modifier = Modifier.size(18.dp)
-                                            )
-                                        }
-                                    }
-
-                                    AnimatedVisibility(
-                                        visible = showHistoryTurns,
-                                        enter = expandVertically() + fadeIn(),
-                                        exit = shrinkVertically() + fadeOut()
-                                    ) {
-                                        Column(
-                                            verticalArrangement = Arrangement.spacedBy(10.dp),
-                                            modifier = Modifier.padding(top = 10.dp)
-                                        ) {
-                                            earlierTurns.forEach { pastTurn ->
-                                                PastChapterCard(
-                                                    turn = pastTurn,
-                                                    accentColor = dynamicSpec.accentPrimary
+                                                    onOpenCodex = {
+                                                        haptics.tap()
+                                                        codexTab = 0
+                                                        coroutineScope.launch {
+                                                            pagerState.animateScrollToPage(2)
+                                                        }
+                                                    },
+                                                    modifier = Modifier
+                                                        .fillMaxSize()
+                                                        .navigationBarsPadding()
                                                 )
                                             }
                                         }
                                     }
-                                }
-                            }
 
-                            // 3. Dedicated Narrative Window (отдельное окно повествования)
-                            item(key = "narrative_window") {
-                                if (generatingState != null) {
-                                    GeneratingNarrativeWindow(
-                                        pendingAction = generatingState.pendingAction,
-                                        streamingNarrative = generatingState.streamingNarrative,
-                                        accentColor = dynamicSpec.accentPrimary
-                                    )
-                                } else if (latestTurn != null) {
-                                    ActiveNarrativeWindow(
-                                        turn = latestTurn,
-                                        accentColor = dynamicSpec.accentPrimary,
-                                        secondaryColor = dynamicSpec.accentSecondary
-                                    )
-                                }
-                            }
-
-                            // 4. Dedicated NPC Window with Avatar inside the text window
-                            if (data.campaign.activeNpc.hasActiveNpc && data.campaign.activeNpc.name.isNotBlank()) {
-                                item(key = "npc_dialogue_window") {
-                                    NpcEmotionCard(
-                                        npc = data.campaign.activeNpc,
-                                        universe = data.campaign.universe,
-                                        palette = universePalette,
-                                        npcRelation = activeNpcRelation,
-                                        onClick = {
-                                            if (generatingState == null && customActionText.isBlank()) {
-                                                haptics.tap()
-                                                customActionText = "Обратиться к ${data.campaign.activeNpc.name}: "
-                                            }
-                                        }
-                                    )
-                                }
-                            }
-
-                            // 5. Choices & Quick Codex/Stats Footer Buttons
-                            item(key = "choices_footer") {
-                                Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
-                                    if (generatingState == null && latestTurn != null && latestTurn.choices.isNotEmpty()) {
-                                        Surface(
-                                            color = MaterialTheme.colorScheme.surface.copy(alpha = 0.82f),
-                                            shape = RoundedCornerShape(999.dp),
-                                            border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant)
+                                    // Center Page: Scene Background + Messenger Chat Bubbles + Choices
+                                    1 -> {
+                                        Box(
+                                            modifier = Modifier.fillMaxSize(),
+                                            contentAlignment = Alignment.TopCenter
                                         ) {
-                                            Text(
-                                                text = "Ваш выбор",
-                                                style = MaterialTheme.typography.titleSmall,
-                                                fontWeight = FontWeight.SemiBold,
-                                                color = MaterialTheme.colorScheme.onSurface,
-                                                modifier = Modifier.padding(horizontal = 12.dp, vertical = 5.dp)
-                                            )
-                                        }
-                                        latestTurn.choices.forEach { choice ->
-                                            ChoiceActionCard(
-                                                choice = choice,
-                                                palette = universePalette,
-                                                onClick = {
-                                                    haptics.tap()
-                                                    viewModel.submitPlayerAction(choice.text)
+                                            LazyColumn(
+                                                state = listState,
+                                                contentPadding = PaddingValues(
+                                                    start = 14.dp,
+                                                    end = 14.dp,
+                                                    top = 4.dp,
+                                                    bottom = 20.dp
+                                                ),
+                                                verticalArrangement = Arrangement.spacedBy(12.dp),
+                                                modifier = Modifier
+                                                    .fillMaxSize()
+                                                    .widthIn(max = 720.dp)
+                                            ) {
+                                                // Slim atmospheric Scene Pill
+                                                item(key = "scene_location_strip") {
+                                                    SceneStatusBarStrip(
+                                                        location = data.campaign.hudLocation,
+                                                        timeLabel = data.campaign.hudTime,
+                                                        weatherMood = stats.weatherMood,
+                                                        healthPercent = stats.healthPercent,
+                                                        accentColor = dynamicSpec.accentPrimary,
+                                                        secondaryColor = dynamicSpec.accentSecondary,
+                                                        onInspectScene = {
+                                                            if (generatingState == null && customActionText.isBlank()) {
+                                                                haptics.tap()
+                                                                customActionText = "Осмотреться вокруг (${data.campaign.hudLocation.ifBlank { "в сцене" }}): "
+                                                            }
+                                                        },
+                                                        onOpenStats = {
+                                                            haptics.tap()
+                                                            coroutineScope.launch {
+                                                                pagerState.animateScrollToPage(0)
+                                                            }
+                                                        }
+                                                    )
                                                 }
-                                            )
+
+                                                // Collapsible Earlier Chapters
+                                                if (earlierTurns.isNotEmpty()) {
+                                                    item(key = "earlier_chapters_toggle") {
+                                                        Surface(
+                                                            color = MaterialTheme.colorScheme.surface.copy(alpha = 0.72f),
+                                                            shape = MaterialTheme.shapes.medium,
+                                                            border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant),
+                                                            modifier = Modifier
+                                                                .fillMaxWidth()
+                                                                .clip(MaterialTheme.shapes.medium)
+                                                                .clickable {
+                                                                    haptics.tap()
+                                                                    showHistoryTurns = !showHistoryTurns
+                                                                }
+                                                                .testTag("toggle_history_chapters")
+                                                        ) {
+                                                            Row(
+                                                                modifier = Modifier.padding(horizontal = 14.dp, vertical = 10.dp),
+                                                                verticalAlignment = Alignment.CenterVertically,
+                                                                horizontalArrangement = Arrangement.SpaceBetween
+                                                            ) {
+                                                                Row(
+                                                                    verticalAlignment = Alignment.CenterVertically,
+                                                                    horizontalArrangement = Arrangement.spacedBy(8.dp)
+                                                                ) {
+                                                                    Icon(
+                                                                        imageVector = Icons.Outlined.History,
+                                                                        contentDescription = null,
+                                                                        tint = dynamicSpec.accentSecondary,
+                                                                        modifier = Modifier.size(16.dp)
+                                                                    )
+                                                                    Text(
+                                                                        text = if (showHistoryTurns) {
+                                                                            "Скрыть прошлые сообщения (${earlierTurns.size})"
+                                                                        } else {
+                                                                            "Прошлые главы (${earlierTurns.size})"
+                                                                        },
+                                                                        style = MaterialTheme.typography.labelMedium,
+                                                                        color = MaterialTheme.colorScheme.onSurface
+                                                                    )
+                                                                }
+                                                                Icon(
+                                                                    imageVector = if (showHistoryTurns) {
+                                                                        Icons.Outlined.ExpandLess
+                                                                    } else {
+                                                                        Icons.Outlined.ExpandMore
+                                                                    },
+                                                                    contentDescription = null,
+                                                                    tint = MaterialTheme.colorScheme.onSurfaceVariant,
+                                                                    modifier = Modifier.size(18.dp)
+                                                                )
+                                                            }
+                                                        }
+
+                                                        androidx.compose.animation.AnimatedVisibility(
+                                                            visible = showHistoryTurns,
+                                                            enter = expandVertically() + fadeIn(),
+                                                            exit = shrinkVertically() + fadeOut()
+                                                        ) {
+                                                            Column(
+                                                                verticalArrangement = Arrangement.spacedBy(10.dp),
+                                                                modifier = Modifier.padding(top = 10.dp)
+                                                            ) {
+                                                                earlierTurns.forEach { pastTurn ->
+                                                                    PastChapterCard(
+                                                                        turn = pastTurn,
+                                                                        accentColor = dynamicSpec.accentPrimary
+                                                                    )
+                                                                }
+                                                            }
+                                                        }
+                                                    }
+                                                }
+
+                                                // Top Messenger Chat Bubbles: Player outgoing bubble (right) + Narrative bubble (left)
+                                                item(key = "narrative_window") {
+                                                    if (generatingState != null) {
+                                                        GeneratingNarrativeWindow(
+                                                            pendingAction = generatingState.pendingAction,
+                                                            streamingNarrative = generatingState.streamingNarrative,
+                                                            accentColor = dynamicSpec.accentPrimary
+                                                        )
+                                                    } else if (latestTurn != null) {
+                                                        ActiveNarrativeWindow(
+                                                            turn = latestTurn,
+                                                            accentColor = dynamicSpec.accentPrimary,
+                                                            secondaryColor = dynamicSpec.accentSecondary
+                                                        )
+                                                    }
+                                                }
+
+                                                // Bottom Messenger-Style NPC Row: standalone Avatar on bottom-left + Chat Bubble
+                                                if (data.campaign.activeNpc.hasActiveNpc && data.campaign.activeNpc.name.isNotBlank()) {
+                                                    item(key = "npc_dialogue_window") {
+                                                        NpcEmotionCard(
+                                                            npc = data.campaign.activeNpc,
+                                                            universe = data.campaign.universe,
+                                                            palette = universePalette,
+                                                            npcRelation = activeNpcRelation,
+                                                            onClick = {
+                                                                if (generatingState == null && customActionText.isBlank()) {
+                                                                    haptics.tap()
+                                                                    customActionText = "Обратиться к ${data.campaign.activeNpc.name}: "
+                                                                }
+                                                            }
+                                                        )
+                                                    }
+                                                }
+
+                                                // Choices
+                                                item(key = "choices_footer") {
+                                                    Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
+                                                        if (generatingState == null && latestTurn != null && latestTurn.choices.isNotEmpty()) {
+                                                            Surface(
+                                                                color = MaterialTheme.colorScheme.surface.copy(alpha = 0.82f),
+                                                                shape = RoundedCornerShape(999.dp),
+                                                                border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant)
+                                                            ) {
+                                                                Text(
+                                                                    text = "Ваш выбор",
+                                                                    style = MaterialTheme.typography.titleSmall,
+                                                                    fontWeight = FontWeight.SemiBold,
+                                                                    color = MaterialTheme.colorScheme.onSurface,
+                                                                    modifier = Modifier.padding(horizontal = 12.dp, vertical = 5.dp)
+                                                                )
+                                                            }
+                                                            latestTurn.choices.forEach { choice ->
+                                                                ChoiceActionCard(
+                                                                    choice = choice,
+                                                                    palette = universePalette,
+                                                                    onClick = {
+                                                                        haptics.tap()
+                                                                        viewModel.submitPlayerAction(choice.text)
+                                                                    }
+                                                                )
+                                                            }
+                                                        }
+                                                    }
+                                                }
+                                            }
+                                        }
+                                    }
+
+                                    // Swipe Left -> Right Page: Codex, NPC Relations, Butterfly & Facts
+                                    else -> {
+                                        Box(
+                                            modifier = Modifier.fillMaxSize(),
+                                            contentAlignment = Alignment.TopCenter
+                                        ) {
+                                            Surface(
+                                                color = MaterialTheme.colorScheme.surface.copy(alpha = 0.86f),
+                                                shape = MaterialTheme.shapes.large,
+                                                border = BorderStroke(1.dp, dynamicSpec.accentPrimary.copy(alpha = 0.34f)),
+                                                modifier = Modifier
+                                                    .fillMaxSize()
+                                                    .widthIn(max = 720.dp)
+                                                    .padding(horizontal = 12.dp, vertical = 6.dp)
+                                                    .testTag("codex_swipe_page")
+                                            ) {
+                                                CodexContent(
+                                                    campaign = data.campaign,
+                                                    facts = facts,
+                                                    selectedTab = codexTab,
+                                                    onTabSelect = { codexTab = it },
+                                                    onAddFact = { text ->
+                                                        haptics.tap()
+                                                        viewModel.addFact(text)
+                                                    },
+                                                    onToggleFactPinned = { id ->
+                                                        haptics.tap()
+                                                        viewModel.toggleFactPinned(id)
+                                                    },
+                                                    onDeleteFact = { id ->
+                                                        haptics.tap()
+                                                        viewModel.deleteFact(id)
+                                                    },
+                                                    onItemClick = { item ->
+                                                        haptics.tap()
+                                                        selectedItemForAction = item
+                                                    },
+                                                    modifier = Modifier
+                                                        .fillMaxSize()
+                                                        .padding(top = 12.dp)
+                                                        .navigationBarsPadding()
+                                                )
+                                            }
                                         }
                                     }
                                 }
@@ -764,51 +941,6 @@ fun GameSessionScreen(
                 }
             }
         }
-    }
-
-    if (showStatsSheet && successData != null) {
-        val stats = parsedStats ?: HudStatsParser.parse(successData.campaign)
-        StatsAndInventorySheet(
-            campaign = successData.campaign,
-            stats = stats,
-            palette = universePalette,
-            onItemClick = { item ->
-                haptics.tap()
-                selectedItemForAction = item
-            },
-            onOpenCodex = {
-                haptics.tap()
-                codexInitialTab = 0
-                showCodex = true
-            },
-            onDismiss = { showStatsSheet = false }
-        )
-    }
-
-    if (showCodex && successData != null) {
-        CodexBottomSheet(
-            campaign = successData.campaign,
-            facts = facts,
-            initialTabIndex = codexInitialTab,
-            onAddFact = { text ->
-                haptics.tap()
-                viewModel.addFact(text)
-            },
-            onToggleFactPinned = { id ->
-                haptics.tap()
-                viewModel.toggleFactPinned(id)
-            },
-            onDeleteFact = { id ->
-                haptics.tap()
-                viewModel.deleteFact(id)
-            },
-            onItemClick = { item ->
-                haptics.tap()
-                showCodex = false
-                selectedItemForAction = item
-            },
-            onDismiss = { showCodex = false }
-        )
     }
 
     val activeItem = selectedItemForAction
@@ -829,10 +961,12 @@ fun GameSessionScreen(
             onDismiss = { selectedItemForAction = null },
             onUseInScene = { item ->
                 haptics.impactConfirm()
+                coroutineScope.launch { pagerState.animateScrollToPage(1) }
                 viewModel.submitPlayerAction("Использовать предмет из инвентаря: «$item» в текущей ситуации.")
             },
             onGiveToNpc = { item, npcName ->
                 haptics.impactConfirm()
+                coroutineScope.launch { pagerState.animateScrollToPage(1) }
                 viewModel.submitPlayerAction("Показать или передать предмет «$item» персонажу $npcName.")
             },
             onInsertIntoDraft = { item ->
@@ -843,8 +977,116 @@ fun GameSessionScreen(
                 } else {
                     "${customActionText.trimEnd()} ($item) "
                 }
+                coroutineScope.launch { pagerState.animateScrollToPage(1) }
             }
         )
+    }
+}
+
+@Composable
+private fun SwipeNavigationStrip(
+    currentPage: Int,
+    accentColor: Color,
+    secondaryColor: Color,
+    onSelectPage: (Int) -> Unit,
+    modifier: Modifier = Modifier
+) {
+    Row(
+        modifier = modifier,
+        horizontalArrangement = Arrangement.spacedBy(6.dp),
+        verticalAlignment = Alignment.CenterVertically
+    ) {
+        SwipeTabPill(
+            label = "Статус и вещи",
+            selected = currentPage == 0,
+            accentColor = secondaryColor,
+            leadingIcon = Icons.Outlined.ChevronLeft,
+            trailingIcon = null,
+            onClick = { onSelectPage(0) },
+            modifier = Modifier
+                .weight(1f)
+                .testTag("swipe_tab_stats")
+        )
+        SwipeTabPill(
+            label = "Сцена",
+            selected = currentPage == 1,
+            accentColor = accentColor,
+            leadingIcon = null,
+            trailingIcon = null,
+            onClick = { onSelectPage(1) },
+            modifier = Modifier
+                .weight(0.75f)
+                .testTag("swipe_tab_scene")
+        )
+        SwipeTabPill(
+            label = "Кодекс",
+            selected = currentPage == 2,
+            accentColor = accentColor,
+            leadingIcon = null,
+            trailingIcon = Icons.Outlined.ChevronRight,
+            onClick = { onSelectPage(2) },
+            modifier = Modifier
+                .weight(1f)
+                .testTag("swipe_tab_codex")
+        )
+    }
+}
+
+@Composable
+private fun SwipeTabPill(
+    label: String,
+    selected: Boolean,
+    accentColor: Color,
+    leadingIcon: ImageVector?,
+    trailingIcon: ImageVector?,
+    onClick: () -> Unit,
+    modifier: Modifier = Modifier
+) {
+    Surface(
+        color = if (selected) {
+            accentColor.copy(alpha = 0.24f)
+        } else {
+            MaterialTheme.colorScheme.surface.copy(alpha = 0.68f)
+        },
+        shape = RoundedCornerShape(999.dp),
+        border = BorderStroke(
+            width = 1.dp,
+            color = if (selected) accentColor else MaterialTheme.colorScheme.outlineVariant
+        ),
+        modifier = modifier
+            .clip(RoundedCornerShape(999.dp))
+            .clickable(onClick = onClick)
+    ) {
+        Row(
+            modifier = Modifier.padding(horizontal = 8.dp, vertical = 6.dp),
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.Center
+        ) {
+            if (leadingIcon != null) {
+                Icon(
+                    imageVector = leadingIcon,
+                    contentDescription = null,
+                    tint = if (selected) accentColor else MaterialTheme.colorScheme.onSurfaceVariant,
+                    modifier = Modifier.size(14.dp)
+                )
+            }
+            Text(
+                text = label,
+                style = MaterialTheme.typography.labelSmall,
+                fontWeight = if (selected) FontWeight.Bold else FontWeight.Medium,
+                color = if (selected) MaterialTheme.colorScheme.onSurface else MaterialTheme.colorScheme.onSurfaceVariant,
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis
+            )
+            if (trailingIcon != null) {
+                Icon(
+                    imageVector = trailingIcon,
+                    contentDescription = null,
+                    tint = if (selected) accentColor else MaterialTheme.colorScheme.onSurfaceVariant,
+                    modifier = Modifier.size(14.dp)
+                )
+            }
+        }
     }
 }
 
@@ -949,69 +1191,92 @@ private fun ActiveNarrativeWindow(
     accentColor: Color,
     secondaryColor: Color
 ) {
-    Surface(
-        color = MaterialTheme.colorScheme.surface.copy(alpha = 0.88f),
-        shape = MaterialTheme.shapes.large,
-        border = BorderStroke(1.dp, accentColor.copy(alpha = 0.36f)),
-        tonalElevation = 4.dp,
-        shadowElevation = 6.dp,
-        modifier = Modifier
-            .fillMaxWidth()
-            .testTag("narrative_window")
+    val narratorBubbleShape = RoundedCornerShape(
+        topStart = 4.dp,
+        topEnd = 20.dp,
+        bottomEnd = 20.dp,
+        bottomStart = 20.dp
+    )
+    val playerBubbleShape = RoundedCornerShape(
+        topStart = 18.dp,
+        topEnd = 18.dp,
+        bottomStart = 18.dp,
+        bottomEnd = 4.dp
+    )
+
+    Column(
+        verticalArrangement = Arrangement.spacedBy(10.dp),
+        modifier = Modifier.fillMaxWidth()
     ) {
-        Column(
-            modifier = Modifier.padding(18.dp),
-            verticalArrangement = Arrangement.spacedBy(12.dp)
-        ) {
+        if (turn.turnNumber > 1L && turn.playerAction.isNotBlank()) {
             Row(
-                verticalAlignment = Alignment.CenterVertically,
-                horizontalArrangement = Arrangement.spacedBy(10.dp),
-                modifier = Modifier.fillMaxWidth()
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.End
             ) {
                 Surface(
-                    color = accentColor.copy(alpha = 0.16f),
-                    contentColor = accentColor,
-                    shape = RoundedCornerShape(999.dp),
-                    border = BorderStroke(1.dp, accentColor.copy(alpha = 0.35f))
+                    color = accentColor.copy(alpha = 0.24f),
+                    shape = playerBubbleShape,
+                    border = BorderStroke(1.dp, accentColor.copy(alpha = 0.55f)),
+                    modifier = Modifier.widthIn(max = 520.dp)
                 ) {
                     Text(
-                        text = "Глава ${turn.turnNumber}",
-                        style = MaterialTheme.typography.labelMedium,
-                        fontWeight = FontWeight.SemiBold,
-                        modifier = Modifier.padding(horizontal = 10.dp, vertical = 4.dp)
+                        text = turn.playerAction,
+                        style = MaterialTheme.typography.bodyMedium,
+                        color = MaterialTheme.colorScheme.onSurface,
+                        modifier = Modifier.padding(horizontal = 14.dp, vertical = 9.dp)
                     )
                 }
-                HorizontalDivider(
-                    color = MaterialTheme.colorScheme.outlineVariant,
-                    modifier = Modifier.weight(1f)
-                )
-                Text(
-                    text = "Повествование",
-                    style = MaterialTheme.typography.labelSmall,
-                    color = secondaryColor
-                )
             }
+        }
 
-            if (turn.turnNumber > 1L && turn.playerAction.isNotBlank()) {
-                Surface(
-                    color = MaterialTheme.colorScheme.background.copy(alpha = 0.52f),
-                    shape = MaterialTheme.shapes.small,
-                    border = BorderStroke(1.dp, accentColor.copy(alpha = 0.25f)),
+        Surface(
+            color = MaterialTheme.colorScheme.surface.copy(alpha = 0.88f),
+            shape = narratorBubbleShape,
+            border = BorderStroke(1.dp, accentColor.copy(alpha = 0.36f)),
+            tonalElevation = 4.dp,
+            shadowElevation = 6.dp,
+            modifier = Modifier
+                .fillMaxWidth()
+                .testTag("narrative_window")
+        ) {
+            Column(
+                modifier = Modifier.padding(horizontal = 16.dp, vertical = 14.dp),
+                verticalArrangement = Arrangement.spacedBy(10.dp)
+            ) {
+                Row(
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.spacedBy(8.dp),
                     modifier = Modifier.fillMaxWidth()
                 ) {
+                    Surface(
+                        color = accentColor.copy(alpha = 0.16f),
+                        contentColor = accentColor,
+                        shape = RoundedCornerShape(999.dp),
+                        border = BorderStroke(1.dp, accentColor.copy(alpha = 0.35f))
+                    ) {
+                        Text(
+                            text = "Мастер • Глава ${turn.turnNumber}",
+                            style = MaterialTheme.typography.labelMedium,
+                            fontWeight = FontWeight.SemiBold,
+                            modifier = Modifier.padding(horizontal = 10.dp, vertical = 3.dp)
+                        )
+                    }
+                    HorizontalDivider(
+                        color = MaterialTheme.colorScheme.outlineVariant,
+                        modifier = Modifier.weight(1f)
+                    )
                     Text(
-                        text = "Ваш шаг: ${turn.playerAction}",
-                        style = MaterialTheme.typography.bodySmall.copy(fontStyle = FontStyle.Italic),
-                        color = MaterialTheme.colorScheme.onSurfaceVariant,
-                        modifier = Modifier.padding(horizontal = 11.dp, vertical = 7.dp)
+                        text = "Повествование",
+                        style = MaterialTheme.typography.labelSmall,
+                        color = secondaryColor
                     )
                 }
-            }
 
-            EditorialNarrativeText(
-                narrative = turn.narrative,
-                dropCapColor = accentColor
-            )
+                EditorialNarrativeText(
+                    narrative = turn.narrative,
+                    dropCapColor = accentColor
+                )
+            }
         }
     }
 }
@@ -1059,9 +1324,15 @@ private fun PastChapterCard(
     turn: CampaignTurn,
     accentColor: Color
 ) {
+    val narratorBubbleShape = RoundedCornerShape(
+        topStart = 4.dp,
+        topEnd = 16.dp,
+        bottomEnd = 16.dp,
+        bottomStart = 16.dp
+    )
     Surface(
         color = MaterialTheme.colorScheme.surface.copy(alpha = 0.72f),
-        shape = MaterialTheme.shapes.medium,
+        shape = narratorBubbleShape,
         border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant),
         modifier = Modifier.fillMaxWidth()
     ) {
@@ -1097,44 +1368,76 @@ private fun GeneratingNarrativeWindow(
     streamingNarrative: String,
     accentColor: Color
 ) {
-    Surface(
-        color = MaterialTheme.colorScheme.surface.copy(alpha = 0.90f),
-        shape = MaterialTheme.shapes.large,
-        border = BorderStroke(1.dp, accentColor.copy(alpha = 0.45f)),
-        tonalElevation = 4.dp,
+    val narratorBubbleShape = RoundedCornerShape(
+        topStart = 4.dp,
+        topEnd = 20.dp,
+        bottomEnd = 20.dp,
+        bottomStart = 20.dp
+    )
+    val playerBubbleShape = RoundedCornerShape(
+        topStart = 18.dp,
+        topEnd = 18.dp,
+        bottomStart = 18.dp,
+        bottomEnd = 4.dp
+    )
+
+    Column(
+        verticalArrangement = Arrangement.spacedBy(10.dp),
         modifier = Modifier
             .fillMaxWidth()
             .testTag("generating_turn_card")
     ) {
-        Column(
-            modifier = Modifier.padding(18.dp),
-            verticalArrangement = Arrangement.spacedBy(12.dp)
+        Row(
+            modifier = Modifier.fillMaxWidth(),
+            horizontalArrangement = Arrangement.End
         ) {
-            Text(
-                text = "Ваш шаг: $pendingAction",
-                style = MaterialTheme.typography.bodySmall.copy(fontStyle = FontStyle.Italic),
-                color = MaterialTheme.colorScheme.onSurfaceVariant
-            )
-            LinearProgressIndicator(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .clip(RoundedCornerShape(999.dp)),
-                color = accentColor,
-                trackColor = MaterialTheme.colorScheme.outlineVariant
-            )
-            if (streamingNarrative.isNotBlank()) {
+            Surface(
+                color = accentColor.copy(alpha = 0.24f),
+                shape = playerBubbleShape,
+                border = BorderStroke(1.dp, accentColor.copy(alpha = 0.55f)),
+                modifier = Modifier.widthIn(max = 520.dp)
+            ) {
                 Text(
-                    text = streamingNarrative,
-                    style = MaterialTheme.typography.bodyLarge,
+                    text = pendingAction,
+                    style = MaterialTheme.typography.bodyMedium,
                     color = MaterialTheme.colorScheme.onSurface,
-                    modifier = Modifier.testTag("streaming_narrative_text")
+                    modifier = Modifier.padding(horizontal = 14.dp, vertical = 9.dp)
                 )
-            } else {
-                Text(
-                    text = "Мастер плетёт нити событий и оценивает последствия…",
-                    style = MaterialTheme.typography.bodySmall,
-                    color = accentColor
+            }
+        }
+
+        Surface(
+            color = MaterialTheme.colorScheme.surface.copy(alpha = 0.90f),
+            shape = narratorBubbleShape,
+            border = BorderStroke(1.dp, accentColor.copy(alpha = 0.45f)),
+            tonalElevation = 4.dp,
+            modifier = Modifier.fillMaxWidth()
+        ) {
+            Column(
+                modifier = Modifier.padding(16.dp),
+                verticalArrangement = Arrangement.spacedBy(10.dp)
+            ) {
+                LinearProgressIndicator(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .clip(RoundedCornerShape(999.dp)),
+                    color = accentColor,
+                    trackColor = MaterialTheme.colorScheme.outlineVariant
                 )
+                if (streamingNarrative.isNotBlank()) {
+                    Text(
+                        text = streamingNarrative,
+                        style = MaterialTheme.typography.bodyLarge,
+                        color = MaterialTheme.colorScheme.onSurface,
+                        modifier = Modifier.testTag("streaming_narrative_text")
+                    )
+                } else {
+                    Text(
+                        text = "Мастер плетёт нити событий и оценивает последствия…",
+                        style = MaterialTheme.typography.bodySmall,
+                        color = accentColor
+                    )
+                }
             }
         }
     }

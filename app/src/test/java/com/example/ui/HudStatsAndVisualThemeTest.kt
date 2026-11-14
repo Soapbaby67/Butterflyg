@@ -7,6 +7,7 @@ import com.example.data.model.NpcRelation
 import com.example.data.model.ScenarioGenre
 import com.example.data.model.UniversePresets
 import com.example.data.repository.AiModelChoice
+import com.example.data.repository.GameMasterAiRepository
 import com.example.data.repository.NpcTrustGuardrail
 import com.example.data.repository.PaperThemeMode
 import com.example.data.repository.ReadingFontScale
@@ -285,5 +286,18 @@ class HudStatsAndVisualThemeTest {
 
         assertNotEquals(coffee.bgEnd, potion.bgEnd)
         assertNotEquals(blade.accent, key.accent)
+    }
+
+    @Test
+    fun aiRepositoryUnwrapsGenericUnknownException() {
+        val repo = GameMasterAiRepository()
+        val wrapped = IllegalStateException(
+            "Something unexpected happened.",
+            RuntimeException("Unexpected JSON token at offset 412")
+        )
+        assertEquals(
+            "Unexpected JSON token at offset 412",
+            repo.extractDetailedErrorMessage(wrapped)
+        )
     }
 }
