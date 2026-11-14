@@ -449,7 +449,7 @@ fun GameSessionScreen(
                                             Row(
                                                 modifier = Modifier.padding(horizontal = 12.dp, vertical = 8.dp),
                                                 verticalAlignment = Alignment.CenterVertically,
-                                                horizontalArrangement = Arrangement.SpaceBetween
+                                                horizontalArrangement = Arrangement.spacedBy(8.dp)
                                             ) {
                                                 SelectionContainer(modifier = Modifier.weight(1f)) {
                                                     Text(
@@ -462,7 +462,8 @@ fun GameSessionScreen(
                                                     onClick = {
                                                         haptics.tap()
                                                         viewModel.submitPlayerAction(err.failedAction)
-                                                    }
+                                                    },
+                                                    contentPadding = PaddingValues(horizontal = 8.dp, vertical = 4.dp)
                                                 ) {
                                                     Icon(
                                                         imageVector = Icons.Outlined.Refresh,
@@ -470,7 +471,11 @@ fun GameSessionScreen(
                                                         modifier = Modifier.size(16.dp)
                                                     )
                                                     Spacer(modifier = Modifier.width(4.dp))
-                                                    Text("Повторить")
+                                                    Text(
+                                                        text = "Повторить",
+                                                        maxLines = 1,
+                                                        softWrap = false
+                                                    )
                                                 }
                                             }
                                         }
