@@ -24,6 +24,7 @@ import androidx.lifecycle.viewmodel.viewModelFactory
 import androidx.navigation.NavType
 import androidx.navigation.compose.NavHost
 import androidx.navigation.compose.composable
+import androidx.navigation.compose.currentBackStackEntryAsState
 import androidx.navigation.compose.rememberNavController
 import androidx.navigation.navArgument
 import com.example.auth.attemptAutoSignIn
@@ -43,7 +44,9 @@ import com.example.ui.screens.GameSessionScreen
 import com.example.ui.screens.PresentationScreen
 import com.example.ui.screens.SettingsBottomSheet
 import com.example.ui.screens.SetupWizardScreen
+import com.example.ui.theme.AppVisualLocation
 import com.example.ui.theme.ChroniclesTheme
+import com.example.ui.theme.DynamicThemeContext
 import com.example.ui.viewmodel.CampaignsViewModel
 import com.example.ui.viewmodel.GameSessionViewModel
 import com.example.ui.viewmodel.SetupWizardViewModel
@@ -77,30 +80,27 @@ class MainActivity : ComponentActivity() {
                 initialValue = UserAppSettings()
             )
             val coroutineScope = rememberCoroutineScope()
-
-            val isDark = when (appSettings.themeMode) {
-                PaperThemeMode.LIGHT -> false
-                PaperThemeMode.DARK -> true
-                PaperThemeMode.SYSTEM -> isSystemInDarkTheme()
+            var dynamicContext by remember {
+                mutableStateOf(DynamicThemeContext(location = AppVisualLocation.AUTH))
             }
 
             val cycleTheme: () -> Unit = {
-                val next = when (appSettings.themeMode) {
-                    PaperThemeMode.SYSTEM -> PaperThemeMode.LIGHT
-                    PaperThemeMode.LIGHT -> PaperThemeMode.DARK
-                    PaperThemeMode.DARK -> PaperThemeMode.SYSTEM
-                }
+                val modes = PaperThemeMode.entries
+                val nextIndex = (modes.indexOf(appSettings.themeMode) + 1) % modes.size
+                val next = modes[nextIndex]
                 coroutineScope.launch { themeRepo.setThemeMode(next) }
             }
 
             ChroniclesTheme(
-                darkTheme = isDark,
+                themeMode = appSettings.themeMode,
+                dynamicContext = dynamicContext,
                 fontStyle = appSettings.fontStyle,
                 fontScale = appSettings.fontScale
             ) {
                 AppNavigation(
                     appSettings = appSettings,
                     themeRepo = themeRepo,
+                    onDynamicContextChange = { dynamicContext = it },
                     onCycleTheme = cycleTheme
                 )
             }
@@ -112,6 +112,7 @@ class MainActivity : ComponentActivity() {
 fun AppNavigation(
     appSettings: UserAppSettings,
     themeRepo: ThemePreferencesRepository,
+    onDynamicContextChange: (DynamicThemeContext) -> Unit,
     onCycleTheme: () -> Unit
 ) {
     val context = LocalContext.current
@@ -146,6 +147,9 @@ fun AppNavigation(
 
     val user = currentUser
     if (user == null) {
+        LaunchedEffect(Unit) {
+            onDynamicContextChange(DynamicThemeContext(location = AppVisualLocation.AUTH))
+        }
         AuthScreen(
             themeMode = appSettings.themeMode,
             onCycleTheme = onCycleTheme,
@@ -162,6 +166,7 @@ fun AppNavigation(
                 userDisplayName = user.displayName ?: user.email.orEmpty(),
                 appSettings = appSettings,
                 themeRepo = themeRepo,
+                onDynamicContextChange = onDynamicContextChange,
                 onCycleTheme = onCycleTheme,
                 onSignOut = {
                     signOutUser(
@@ -180,6 +185,7 @@ private fun AuthenticatedNavHost(
     userDisplayName: String,
     appSettings: UserAppSettings,
     themeRepo: ThemePreferencesRepository,
+    onDynamicContextChange: (DynamicThemeContext) -> Unit,
     onCycleTheme: () -> Unit,
     onSignOut: () -> Unit
 ) {
@@ -187,6 +193,22 @@ private fun AuthenticatedNavHost(
     val appContext = LocalContext.current.applicationContext
     val coroutineScope = rememberCoroutineScope()
     var showSettingsSheet by remember { mutableStateOf(false) }
+
+    val navBackStackEntry by navController.currentBackStackEntryAsState()
+    val currentRoute = navBackStackEntry?.destination?.route
+    LaunchedEffect(currentRoute) {
+        when (currentRoute) {
+            ROUTE_CAMPAIGNS -> onDynamicContextChange(
+                DynamicThemeContext(location = AppVisualLocation.SHELF)
+            )
+            ROUTE_SETUP -> onDynamicContextChange(
+                DynamicThemeContext(location = AppVisualLocation.WIZARD)
+            )
+            ROUTE_PRESENTATION -> onDynamicContextChange(
+                DynamicThemeContext(location = AppVisualLocation.PRESENTATION)
+            )
+        }
+    }
 
     val aiRepository = remember(appContext) {
         GameMasterAiRepository(
@@ -311,6 +333,7 @@ private fun AuthenticatedNavHost(
             GameSessionScreen(
                 viewModel = sessionVm,
                 hapticsEnabled = appSettings.hapticsEnabled,
+                onDynamicContextChange = onDynamicContextChange,
                 onOpenSettings = { showSettingsSheet = true },
                 onBack = { navController.popBackStack() }
             )

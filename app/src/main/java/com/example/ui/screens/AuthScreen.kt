@@ -36,6 +36,7 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalContext
@@ -50,6 +51,7 @@ import com.example.auth.findActivity
 import com.example.auth.onGoogleSignInClicked
 import com.example.data.repository.PaperThemeMode
 import com.example.ui.components.PaperThemeToggleButton
+import com.example.ui.theme.ChroniclesDynamicBackdrop
 
 @Composable
 fun AuthScreen(
@@ -66,9 +68,10 @@ fun AuthScreen(
     var isLoading by remember { mutableStateOf(false) }
     var errorMessage by remember { mutableStateOf<String?>(null) }
 
-    Scaffold(
-        containerColor = MaterialTheme.colorScheme.background
-    ) { innerPadding ->
+    ChroniclesDynamicBackdrop {
+        Scaffold(
+            containerColor = Color.Transparent
+        ) { innerPadding ->
         Box(
             modifier = Modifier
                 .fillMaxSize()
@@ -130,7 +133,7 @@ fun AuthScreen(
                 Spacer(modifier = Modifier.height(22.dp))
 
                 Surface(
-                    color = MaterialTheme.colorScheme.surface,
+                    color = MaterialTheme.colorScheme.surface.copy(alpha = 0.88f),
                     shape = MaterialTheme.shapes.medium,
                     border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant),
                     modifier = Modifier.fillMaxWidth()
@@ -221,6 +224,7 @@ fun AuthScreen(
                     }
                 }
             }
+        }
         }
     }
 }

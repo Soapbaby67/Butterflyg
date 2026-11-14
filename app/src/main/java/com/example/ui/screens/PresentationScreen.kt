@@ -62,6 +62,7 @@ import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.testTag
@@ -70,6 +71,7 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import com.example.R
 import com.example.core.rememberRpgHaptics
+import com.example.ui.theme.ChroniclesDynamicBackdrop
 import kotlinx.coroutines.launch
 
 private const val TOTAL_SLIDES = 9
@@ -84,14 +86,15 @@ fun PresentationScreen(
     val scope = rememberCoroutineScope()
     val haptics = rememberRpgHaptics(hapticsEnabled)
 
-    Scaffold(
-        containerColor = MaterialTheme.colorScheme.background,
-        topBar = {
-            TopAppBar(
-                colors = TopAppBarDefaults.topAppBarColors(
-                    containerColor = MaterialTheme.colorScheme.background,
-                    titleContentColor = MaterialTheme.colorScheme.onBackground
-                ),
+    ChroniclesDynamicBackdrop {
+        Scaffold(
+            containerColor = Color.Transparent,
+            topBar = {
+                TopAppBar(
+                    colors = TopAppBarDefaults.topAppBarColors(
+                        containerColor = Color.Transparent,
+                        titleContentColor = MaterialTheme.colorScheme.onBackground
+                    ),
                 navigationIcon = {
                     IconButton(
                         onClick = onBack,
@@ -249,16 +252,17 @@ fun PresentationScreen(
                 }
             }
         }
+        }
     }
 }
 
 @Composable
 private fun SlideContainer(content: @Composable () -> Unit) {
     Surface(
-        color = MaterialTheme.colorScheme.surface,
+        color = MaterialTheme.colorScheme.surface.copy(alpha = 0.88f),
         shape = MaterialTheme.shapes.large,
         border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant),
-        tonalElevation = 1.dp,
+        tonalElevation = 2.dp,
         modifier = Modifier.fillMaxSize()
     ) {
         Column(
@@ -481,12 +485,11 @@ private fun SlideGameplayWireframe() {
                 style = MaterialTheme.typography.labelLarge,
                 color = MaterialTheme.colorScheme.primary
             )
-            WireframeRow("1. Верхний бар", "Название, ход, [Факты], [Кодекс], [Настройки]")
-            WireframeRow("2. Сворачиваемый HUD", "Полоса здоровья, валюта, счётчик предметов, % канона")
-            WireframeRow("3. Баннер сцены", "Иллюстрация мира + анимированная погода (дождь, снег, неон)")
-            WireframeRow("4. Глава + Стриминг", "Литературный текст печатается по мере ответа ИИ")
-            WireframeRow("5. Карточка NPC", "Аватар, эмоция (1–5), шкала доверия и личные границы")
-            WireframeRow("6. Выборы и ввод", "Карточки подходов + лента быстрого инвентаря")
+            WireframeRow("1. Живой фон сцены", "Полноэкранный арт локации + частицы погоды на фоне")
+            WireframeRow("2. Верхняя панель", "Кнопки вызова [Статус], [Факты], [Кодекс], [Настройки]")
+            WireframeRow("3. Окно повествования", "Отдельная стеклянная карточка с буквицей и стримингом")
+            WireframeRow("4. Окно NPC", "Аватар персонажа прямо внутри окна с репликой и доверием")
+            WireframeRow("5. Выборы и предметы", "Карточки подходов + лента предметов со своей картинкой")
         }
     }
 }
@@ -586,8 +589,8 @@ private fun SlideCustomizationAndModels() {
     )
     SlideBulletCard(
         icon = Icons.Outlined.Settings,
-        title = "Тема бумаги и тактильная отдача",
-        body = "Системная, светлая или тёмная бумага плюс лёгкая вибрация на выборы, предметы и поворотные события."
+        title = "5 тем оформления и тактильная отдача",
+        body = "Динамический градиент по умолчанию (меняется от экрана, мира и эмоций сцены), Светлая/Тёмная бумага, Ночной неон и виброотклик."
     )
 }
 

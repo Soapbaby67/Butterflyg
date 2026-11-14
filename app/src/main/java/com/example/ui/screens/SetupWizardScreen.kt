@@ -45,12 +45,14 @@ import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.example.R
 import com.example.data.model.UniversePresets
+import com.example.ui.theme.ChroniclesDynamicBackdrop
 import com.example.ui.viewmodel.CharacterArchetype
 import com.example.ui.viewmodel.SetupWizardViewModel
 
@@ -84,14 +86,15 @@ fun SetupWizardScreen(
         }
     }
 
-    Scaffold(
-        containerColor = MaterialTheme.colorScheme.background,
-        topBar = {
-            TopAppBar(
-                colors = TopAppBarDefaults.topAppBarColors(
-                    containerColor = MaterialTheme.colorScheme.background,
-                    titleContentColor = MaterialTheme.colorScheme.onBackground
-                ),
+    ChroniclesDynamicBackdrop {
+        Scaffold(
+            containerColor = Color.Transparent,
+            topBar = {
+                TopAppBar(
+                    colors = TopAppBarDefaults.topAppBarColors(
+                        containerColor = Color.Transparent,
+                        titleContentColor = MaterialTheme.colorScheme.onBackground
+                    ),
                 navigationIcon = {
                     IconButton(
                         onClick = onBack,
@@ -116,7 +119,7 @@ fun SetupWizardScreen(
         },
         bottomBar = {
             Surface(
-                color = MaterialTheme.colorScheme.surface,
+                color = MaterialTheme.colorScheme.surface.copy(alpha = 0.90f),
                 tonalElevation = 2.dp,
                 border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant)
             ) {
@@ -331,6 +334,7 @@ fun SetupWizardScreen(
 
                 Spacer(modifier = Modifier.height(12.dp))
             }
+        }
         }
     }
 }

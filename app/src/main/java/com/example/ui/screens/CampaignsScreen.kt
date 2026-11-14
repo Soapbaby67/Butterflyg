@@ -76,6 +76,7 @@ import com.example.ui.components.EmotionBadgeChip
 import com.example.ui.components.HudStatsParser
 import com.example.ui.components.NpcPortraitAvatar
 import com.example.ui.components.PaperThemeToggleButton
+import com.example.ui.theme.ChroniclesDynamicBackdrop
 import com.example.ui.theme.WeatherMood
 import com.example.ui.theme.rememberUniverseVisualPalette
 import com.example.ui.theme.resolveSceneBackdropRes
@@ -110,14 +111,15 @@ fun CampaignsScreen(
         }
     }
 
-    Scaffold(
-        containerColor = MaterialTheme.colorScheme.background,
-        topBar = {
-            TopAppBar(
-                colors = TopAppBarDefaults.topAppBarColors(
-                    containerColor = MaterialTheme.colorScheme.background,
-                    titleContentColor = MaterialTheme.colorScheme.onBackground
-                ),
+    ChroniclesDynamicBackdrop {
+        Scaffold(
+            containerColor = Color.Transparent,
+            topBar = {
+                TopAppBar(
+                    colors = TopAppBarDefaults.topAppBarColors(
+                        containerColor = Color.Transparent,
+                        titleContentColor = MaterialTheme.colorScheme.onBackground
+                    ),
                 title = {
                     Column {
                         Text(
@@ -370,6 +372,7 @@ fun CampaignsScreen(
                 }
             }
         }
+    }
     }
 
     val targetDelete = campaignToDelete

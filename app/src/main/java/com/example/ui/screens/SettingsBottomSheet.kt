@@ -1,8 +1,10 @@
 package com.example.ui.screens
 
 import androidx.compose.foundation.BorderStroke
+import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.ExperimentalLayoutApi
 import androidx.compose.foundation.layout.FlowRow
@@ -14,12 +16,14 @@ import androidx.compose.foundation.layout.navigationBarsPadding
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.outlined.AutoAwesome
 import androidx.compose.material.icons.outlined.CheckCircle
 import androidx.compose.material.icons.outlined.DarkMode
+import androidx.compose.material.icons.outlined.Flare
 import androidx.compose.material.icons.outlined.FormatSize
 import androidx.compose.material.icons.outlined.LightMode
 import androidx.compose.material.icons.outlined.RadioButtonUnchecked
@@ -40,6 +44,8 @@ import androidx.compose.runtime.Composable
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.graphics.Brush
+import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
@@ -87,26 +93,34 @@ fun SettingsBottomSheet(
                 modifier = Modifier.testTag("settings_sheet_title")
             )
 
-            // 1. Paper Theme
-            SettingsSectionHeader(title = "Тема бумаги")
+            // 1. App Theme (Dynamic Gradient default + Paper/Neon modes)
+            SettingsSectionHeader(title = "Тема оформления")
+            Text(
+                text = "«Динамический градиент» подстраивает цвета под раздел приложения, вселенную и настроение текущей сцены.",
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant
+            )
             FlowRow(
                 horizontalArrangement = Arrangement.spacedBy(8.dp),
                 verticalArrangement = Arrangement.spacedBy(8.dp)
             ) {
                 PaperThemeMode.entries.forEach { mode ->
-                    val icon = when (mode) {
-                        PaperThemeMode.SYSTEM -> Icons.Outlined.Tonality
-                        PaperThemeMode.LIGHT -> Icons.Outlined.LightMode
-                        PaperThemeMode.DARK -> Icons.Outlined.DarkMode
+                    val swatchColors = when (mode) {
+                        PaperThemeMode.DYNAMIC -> listOf(Color(0xFFE58C8A), Color(0xFFDFB268), Color(0xFF4BE1F2))
+                        PaperThemeMode.LIGHT -> listOf(Color(0xFFFAF6EE), Color(0xFF7C2D32))
+                        PaperThemeMode.DARK -> listOf(Color(0xFF1C1A17), Color(0xFFD4757B))
+                        PaperThemeMode.NEON -> listOf(Color(0xFF0A0E1B), Color(0xFF4BE1F2), Color(0xFFF26D9A))
+                        PaperThemeMode.SYSTEM -> listOf(Color(0xFFFAF6EE), Color(0xFF1C1A17))
                     }
                     FilterChip(
                         selected = settings.themeMode == mode,
                         onClick = { onSelectTheme(mode) },
                         leadingIcon = {
-                            Icon(
-                                imageVector = icon,
-                                contentDescription = null,
-                                modifier = Modifier.size(16.dp)
+                            Box(
+                                modifier = Modifier
+                                    .size(16.dp)
+                                    .clip(CircleShape)
+                                    .background(Brush.linearGradient(swatchColors))
                             )
                         },
                         label = { Text(mode.labelRu) },

@@ -59,8 +59,8 @@ import com.example.data.model.Campaign
 import com.example.data.model.NpcRelation
 import com.example.data.repository.PlayerFactNote
 import com.example.ui.components.EmotionBadgeChip
+import com.example.ui.components.ItemPictureTile
 import com.example.ui.components.NpcPortraitAvatar
-import com.example.ui.components.itemCategoryIcon
 import com.example.ui.theme.UniverseVisualPalette
 import com.example.ui.theme.rememberUniverseVisualPalette
 
@@ -198,23 +198,22 @@ private fun CharacterAndInventoryTab(
                     ) {
                         campaign.inventory.forEach { itemName ->
                             Surface(
-                                color = MaterialTheme.colorScheme.surfaceVariant,
-                                shape = MaterialTheme.shapes.small,
+                                color = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.78f),
+                                shape = MaterialTheme.shapes.medium,
                                 border = BorderStroke(1.dp, palette.accentPrimary.copy(alpha = 0.35f)),
                                 modifier = Modifier
-                                    .clip(MaterialTheme.shapes.small)
+                                    .clip(MaterialTheme.shapes.medium)
                                     .clickable { onItemClick(itemName) }
                             ) {
                                 Row(
                                     verticalAlignment = Alignment.CenterVertically,
-                                    horizontalArrangement = Arrangement.spacedBy(6.dp),
-                                    modifier = Modifier.padding(horizontal = 10.dp, vertical = 7.dp)
+                                    horizontalArrangement = Arrangement.spacedBy(8.dp),
+                                    modifier = Modifier.padding(start = 6.dp, end = 12.dp, top = 6.dp, bottom = 6.dp)
                                 ) {
-                                    Icon(
-                                        imageVector = itemCategoryIcon(itemName),
-                                        contentDescription = null,
-                                        tint = palette.accentPrimary,
-                                        modifier = Modifier.size(15.dp)
+                                    ItemPictureTile(
+                                        itemName = itemName,
+                                        palette = palette,
+                                        size = 30.dp
                                     )
                                     Text(
                                         text = itemName,

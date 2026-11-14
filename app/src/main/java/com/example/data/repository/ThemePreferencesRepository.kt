@@ -9,13 +9,15 @@ import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.map
 
 enum class PaperThemeMode(val key: String, val labelRu: String) {
-    SYSTEM("system", "Системная"),
+    DYNAMIC("dynamic", "Динамический градиент"),
     LIGHT("light", "Светлая бумага"),
-    DARK("dark", "Тёмная бумага");
+    DARK("dark", "Тёмная бумага"),
+    NEON("neon", "Ночной неон"),
+    SYSTEM("system", "Системная");
 
     companion object {
         fun fromKey(key: String?): PaperThemeMode =
-            entries.firstOrNull { it.key == key } ?: SYSTEM
+            entries.firstOrNull { it.key == key } ?: DYNAMIC
     }
 }
 
@@ -75,7 +77,7 @@ enum class ReadingFontScale(
 }
 
 data class UserAppSettings(
-    val themeMode: PaperThemeMode = PaperThemeMode.SYSTEM,
+    val themeMode: PaperThemeMode = PaperThemeMode.DYNAMIC,
     val aiModel: AiModelChoice = AiModelChoice.FLASH_LITE,
     val fontStyle: ReadingFontStyle = ReadingFontStyle.LITERATA,
     val fontScale: ReadingFontScale = ReadingFontScale.NORMAL,

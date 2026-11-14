@@ -2,26 +2,34 @@ package com.example.ui
 
 import com.example.R
 import com.example.data.model.Campaign
+import com.example.data.model.EmotionCategory
 import com.example.data.model.NpcRelation
 import com.example.data.model.ScenarioGenre
 import com.example.data.model.UniversePresets
 import com.example.data.repository.AiModelChoice
 import com.example.data.repository.NpcTrustGuardrail
+import com.example.data.repository.PaperThemeMode
 import com.example.data.repository.ReadingFontScale
 import com.example.data.repository.ReadingFontStyle
 import com.example.data.repository.StreamingNarrativeExtractor
 import com.example.data.repository.UserAppSettings
 import com.example.ui.components.HudStatsParser
+import com.example.ui.components.ItemVisualKind
+import com.example.ui.components.resolveItemVisualSpec
+import com.example.ui.theme.AppVisualLocation
+import com.example.ui.theme.DynamicThemeContext
 import com.example.ui.theme.NpcArchetype
 import com.example.ui.theme.NpcPortraitSpec
 import com.example.ui.theme.UniverseArchetype
 import com.example.ui.theme.WeatherMood
+import com.example.ui.theme.resolveDynamicGradientSpec
 import com.example.ui.theme.resolveNpcPortraitSpec
 import com.example.ui.theme.resolveSceneBackdropRes
 import com.example.ui.theme.resolveUniverseArchetype
 import com.example.ui.theme.resolveUniverseVisualPalette
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
+import org.junit.Assert.assertNotEquals
 import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
 import org.junit.Test
@@ -213,5 +221,69 @@ class HudStatsAndVisualThemeTest {
         val clampedRude = NpcTrustGuardrail.apply(rudeTurn, previous = clampedSecond)
         assertEquals(2L, clampedRude.trustLevel)
         assertEquals("Раздражена", clampedRude.statusLabel)
+    }
+
+    @Test
+    fun dynamicGradientAdaptsToLocationUniverseWeatherAndEmotion() {
+        val defaults = UserAppSettings()
+        assertEquals(PaperThemeMode.DYNAMIC, defaults.themeMode)
+        assertEquals(5, PaperThemeMode.entries.size)
+
+        val shelfSpec = resolveDynamicGradientSpec(
+            themeMode = PaperThemeMode.DYNAMIC,
+            isSystemDark = false,
+            context = DynamicThemeContext(location = AppVisualLocation.SHELF)
+        )
+        val cozyJoySpec = resolveDynamicGradientSpec(
+            themeMode = PaperThemeMode.DYNAMIC,
+            isSystemDark = false,
+            context = DynamicThemeContext(
+                location = AppVisualLocation.GAME,
+                universe = "Кофейня на углу, романтика",
+                weatherMood = WeatherMood.INDOOR_CANDLE,
+                activeEmotion = EmotionCategory.JOY
+            )
+        )
+        val cyberRainFearSpec = resolveDynamicGradientSpec(
+            themeMode = PaperThemeMode.DYNAMIC,
+            isSystemDark = false,
+            context = DynamicThemeContext(
+                location = AppVisualLocation.GAME,
+                universe = "Cyberpunk 2077 (Найт-Сити)",
+                weatherMood = WeatherMood.RAIN,
+                activeEmotion = EmotionCategory.FEAR
+            )
+        )
+        val lightPaperSpec = resolveDynamicGradientSpec(
+            themeMode = PaperThemeMode.LIGHT,
+            isSystemDark = true,
+            context = DynamicThemeContext(location = AppVisualLocation.GAME)
+        )
+
+        assertTrue(shelfSpec.isDarkSurface)
+        assertFalse(lightPaperSpec.isDarkSurface)
+        assertNotEquals(shelfSpec.topColor, cozyJoySpec.topColor)
+        assertNotEquals(cozyJoySpec.middleColor, cyberRainFearSpec.middleColor)
+        assertNotEquals(cozyJoySpec.glowColor, cyberRainFearSpec.glowColor)
+    }
+
+    @Test
+    fun itemVisualResolverAssignsDistinctPicturesAcrossCategories() {
+        val coffee = resolveItemVisualSpec("Термос с латте")
+        val blade = resolveItemVisualSpec("Серебряный стилет")
+        val potion = resolveItemVisualSpec("Эликсир Ласточка")
+        val key = resolveItemVisualSpec("Ключ от архива")
+        val chip = resolveItemVisualSpec("Биометрический пропуск")
+        val bouquet = resolveItemVisualSpec("Букет белых роз")
+
+        assertEquals(ItemVisualKind.COFFEE_DRINK, coffee.kind)
+        assertEquals(ItemVisualKind.BLADE_WEAPON, blade.kind)
+        assertEquals(ItemVisualKind.POTION_ELIXIR, potion.kind)
+        assertEquals(ItemVisualKind.KEY_ACCESS, key.kind)
+        assertEquals(ItemVisualKind.PASS_CHIP, chip.kind)
+        assertEquals(ItemVisualKind.FLOWER_GIFT, bouquet.kind)
+
+        assertNotEquals(coffee.bgEnd, potion.bgEnd)
+        assertNotEquals(blade.accent, key.accent)
     }
 }

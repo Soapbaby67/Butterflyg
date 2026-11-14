@@ -32,6 +32,7 @@ import androidx.compose.material.icons.outlined.DarkMode
 import androidx.compose.material.icons.outlined.ExpandMore
 import androidx.compose.material.icons.outlined.Favorite
 import androidx.compose.material.icons.outlined.FavoriteBorder
+import androidx.compose.material.icons.outlined.Flare
 import androidx.compose.material.icons.outlined.Forum
 import androidx.compose.material.icons.outlined.LightMode
 import androidx.compose.material.icons.outlined.Mood
@@ -161,10 +162,11 @@ fun NpcEmotionCard(
     val (containerColor, contentColor) = emotionColorsFor(category)
 
     Surface(
-        color = MaterialTheme.colorScheme.surface,
+        color = MaterialTheme.colorScheme.surface.copy(alpha = 0.88f),
         shape = MaterialTheme.shapes.large,
-        border = BorderStroke(1.dp, contentColor.copy(alpha = 0.38f)),
-        tonalElevation = 2.dp,
+        border = BorderStroke(1.dp, contentColor.copy(alpha = 0.45f)),
+        tonalElevation = 4.dp,
+        shadowElevation = 4.dp,
         modifier = modifier
             .fillMaxWidth()
             .then(
@@ -179,12 +181,12 @@ fun NpcEmotionCard(
             .testTag("npc_emotion_card")
     ) {
         Column(
-            modifier = Modifier.padding(horizontal = 14.dp, vertical = 12.dp),
+            modifier = Modifier.padding(horizontal = 14.dp, vertical = 13.dp),
             verticalArrangement = Arrangement.spacedBy(10.dp)
         ) {
             Row(
-                verticalAlignment = Alignment.CenterVertically,
-                horizontalArrangement = Arrangement.spacedBy(12.dp),
+                verticalAlignment = Alignment.Top,
+                horizontalArrangement = Arrangement.spacedBy(13.dp),
                 modifier = Modifier.fillMaxWidth()
             ) {
                 NpcPortraitAvatar(
@@ -195,35 +197,25 @@ fun NpcEmotionCard(
                     emotionCategory = npc.emotionCategory,
                     intensity = npc.intensity,
                     palette = palette,
-                    size = 60.dp
+                    size = 66.dp
                 )
 
                 Column(
                     modifier = Modifier.weight(1f),
-                    verticalArrangement = Arrangement.spacedBy(3.dp)
+                    verticalArrangement = Arrangement.spacedBy(4.dp)
                 ) {
-                    Text(
-                        text = npcRelation?.role?.takeIf { it.isNotBlank() } ?: "Собеседник в сцене",
-                        style = MaterialTheme.typography.labelSmall,
-                        color = palette.accentPrimary,
-                        maxLines = 1,
-                        overflow = TextOverflow.Ellipsis
-                    )
-                    Text(
-                        text = npc.name,
-                        style = MaterialTheme.typography.titleMedium,
-                        fontWeight = FontWeight.SemiBold,
-                        color = MaterialTheme.colorScheme.onSurface,
-                        maxLines = 1,
-                        overflow = TextOverflow.Ellipsis
-                    )
                     Row(
-                        verticalAlignment = Alignment.CenterVertically,
-                        horizontalArrangement = Arrangement.spacedBy(8.dp)
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.SpaceBetween,
+                        verticalAlignment = Alignment.CenterVertically
                     ) {
-                        EmotionBadgeChip(
-                            emotionLabel = npc.emotionLabel,
-                            emotionCategory = npc.emotionCategory
+                        Text(
+                            text = npcRelation?.role?.takeIf { it.isNotBlank() } ?: "Собеседник в сцене",
+                            style = MaterialTheme.typography.labelSmall,
+                            color = palette.accentPrimary,
+                            maxLines = 1,
+                            overflow = TextOverflow.Ellipsis,
+                            modifier = Modifier.weight(1f)
                         )
                         // 5-dot emotion intensity meter
                         Row(
@@ -243,15 +235,43 @@ fun NpcEmotionCard(
                             }
                         }
                     }
-                }
-            }
 
-            if (npc.note.isNotBlank()) {
-                Text(
-                    text = "«${npc.note}»",
-                    style = MaterialTheme.typography.bodySmall.copy(fontStyle = FontStyle.Italic),
-                    color = MaterialTheme.colorScheme.onSurfaceVariant
-                )
+                    Row(
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.spacedBy(8.dp),
+                        modifier = Modifier.fillMaxWidth()
+                    ) {
+                        Text(
+                            text = npc.name,
+                            style = MaterialTheme.typography.titleMedium,
+                            fontWeight = FontWeight.SemiBold,
+                            color = MaterialTheme.colorScheme.onSurface,
+                            maxLines = 1,
+                            overflow = TextOverflow.Ellipsis,
+                            modifier = Modifier.weight(1f, fill = false)
+                        )
+                        EmotionBadgeChip(
+                            emotionLabel = npc.emotionLabel,
+                            emotionCategory = npc.emotionCategory
+                        )
+                    }
+
+                    if (npc.note.isNotBlank()) {
+                        Surface(
+                            color = MaterialTheme.colorScheme.background.copy(alpha = 0.55f),
+                            shape = MaterialTheme.shapes.small,
+                            border = BorderStroke(1.dp, contentColor.copy(alpha = 0.22f)),
+                            modifier = Modifier.fillMaxWidth()
+                        ) {
+                            Text(
+                                text = "«${npc.note}»",
+                                style = MaterialTheme.typography.bodySmall.copy(fontStyle = FontStyle.Italic),
+                                color = MaterialTheme.colorScheme.onSurface,
+                                modifier = Modifier.padding(horizontal = 10.dp, vertical = 7.dp)
+                            )
+                        }
+                    }
+                }
             }
 
             if (npcRelation != null) {
@@ -576,14 +596,13 @@ fun HudStatusPanel(
                                     ) {
                                         Row(
                                             verticalAlignment = Alignment.CenterVertically,
-                                            horizontalArrangement = Arrangement.spacedBy(5.dp),
-                                            modifier = Modifier.padding(horizontal = 9.dp, vertical = 6.dp)
+                                            horizontalArrangement = Arrangement.spacedBy(6.dp),
+                                            modifier = Modifier.padding(start = 5.dp, end = 9.dp, top = 5.dp, bottom = 5.dp)
                                         ) {
-                                            Icon(
-                                                imageVector = itemCategoryIcon(item),
-                                                contentDescription = null,
-                                                tint = palette.accentPrimary,
-                                                modifier = Modifier.size(13.dp)
+                                            ItemPictureTile(
+                                                itemName = item,
+                                                palette = palette,
+                                                size = 24.dp
                                             )
                                             Text(
                                                 text = item,
@@ -653,8 +672,10 @@ fun PaperThemeToggleButton(
     modifier: Modifier = Modifier
 ) {
     val icon = when (themeMode) {
+        PaperThemeMode.DYNAMIC -> Icons.Outlined.AutoAwesome
         PaperThemeMode.LIGHT -> Icons.Outlined.LightMode
         PaperThemeMode.DARK -> Icons.Outlined.DarkMode
+        PaperThemeMode.NEON -> Icons.Outlined.Flare
         PaperThemeMode.SYSTEM -> Icons.Outlined.Tonality
     }
     IconButton(
@@ -665,7 +686,7 @@ fun PaperThemeToggleButton(
     ) {
         Icon(
             imageVector = icon,
-            contentDescription = "Тема бумаги: ${themeMode.labelRu}"
+            contentDescription = "Тема: ${themeMode.labelRu}"
         )
     }
 }

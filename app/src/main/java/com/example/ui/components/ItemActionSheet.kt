@@ -12,15 +12,9 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.automirrored.outlined.MenuBook
 import androidx.compose.material.icons.outlined.AutoAwesome
-import androidx.compose.material.icons.outlined.Backpack
 import androidx.compose.material.icons.outlined.CardGiftcard
 import androidx.compose.material.icons.outlined.EditNote
-import androidx.compose.material.icons.outlined.Key
-import androidx.compose.material.icons.outlined.LocalCafe
-import androidx.compose.material.icons.outlined.Science
-import androidx.compose.material.icons.outlined.Security
 import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.ExperimentalMaterial3Api
@@ -33,9 +27,9 @@ import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.material3.rememberModalBottomSheetState
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.remember
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
@@ -54,7 +48,7 @@ fun ItemActionSheet(
     onInsertIntoDraft: (String) -> Unit
 ) {
     val sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true)
-    val (categoryTitle, inspectionHint, icon) = describeInventoryItem(itemName)
+    val visualSpec = remember(itemName) { resolveItemVisualSpec(itemName) }
 
     ModalBottomSheet(
         onDismissRequest = onDismiss,
@@ -71,26 +65,18 @@ fun ItemActionSheet(
         ) {
             Row(
                 verticalAlignment = Alignment.CenterVertically,
-                horizontalArrangement = Arrangement.spacedBy(12.dp)
+                horizontalArrangement = Arrangement.spacedBy(14.dp)
             ) {
-                Surface(
-                    color = palette.accentPrimary.copy(alpha = 0.14f),
-                    contentColor = palette.accentPrimary,
-                    shape = MaterialTheme.shapes.medium,
-                    border = BorderStroke(1.dp, palette.accentPrimary.copy(alpha = 0.35f)),
-                    modifier = Modifier.size(48.dp)
-                ) {
-                    Icon(
-                        imageVector = icon,
-                        contentDescription = itemName,
-                        modifier = Modifier.padding(11.dp)
-                    )
-                }
+                ItemPictureTile(
+                    itemName = itemName,
+                    palette = palette,
+                    size = 56.dp
+                )
                 Column(modifier = Modifier.weight(1f)) {
                     Text(
-                        text = categoryTitle,
+                        text = visualSpec.kind.categoryTitle,
                         style = MaterialTheme.typography.labelMedium,
-                        color = palette.accentPrimary
+                        color = visualSpec.accent
                     )
                     Text(
                         text = itemName,
@@ -108,7 +94,7 @@ fun ItemActionSheet(
                 modifier = Modifier.fillMaxWidth()
             ) {
                 Text(
-                    text = inspectionHint,
+                    text = visualSpec.kind.defaultHint,
                     style = MaterialTheme.typography.bodyMedium,
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                     modifier = Modifier.padding(12.dp)
@@ -182,58 +168,5 @@ fun ItemActionSheet(
 
             Spacer(modifier = Modifier.height(6.dp))
         }
-    }
-}
-
-fun itemCategoryIcon(item: String): ImageVector = describeInventoryItem(item).third
-
-private fun describeInventoryItem(item: String): Triple<String, String, ImageVector> {
-    val lower = item.lowercase()
-    return when {
-        lower.contains("клин") || lower.contains("стилет") || lower.contains("меч") ||
-            lower.contains("нож") || lower.contains("пистол") || lower.contains("брон") ||
-            lower.contains("щит") || lower.contains("палоч") || lower.contains("куна") ->
-            Triple(
-                "Снаряжение / защита",
-                "Можно пустить в ход при угрозе, вскрыть преграду или намекнуть на готовность защищаться.",
-                Icons.Outlined.Security
-            )
-        lower.contains("алхим") || lower.contains("зель") || lower.contains("эликсир") ||
-            lower.contains("аптеч") || lower.contains("лекар") || lower.contains("трав") ||
-            lower.contains("мазь") ->
-            Triple(
-                "Медицина / эликсир",
-                "Поможет восстановить силы, снять усталость или помочь раненому персонажу рядом.",
-                Icons.Outlined.Science
-            )
-        lower.contains("кофе") || lower.contains("чай") || lower.contains("пирог") ||
-            lower.contains("булоч") || lower.contains("круж") || lower.contains("плед") ||
-            lower.contains("зонт") || lower.contains("цвет") ->
-            Triple(
-                "Уютная деталь / жест внимания",
-                "Отличный способ сменить тон беседы, проявить заботу и сблизиться с собеседником.",
-                Icons.Outlined.LocalCafe
-            )
-        lower.contains("ключ") || lower.contains("пропуск") || lower.contains("печать") ||
-            lower.contains("чип") || lower.contains("карт") ->
-            Triple(
-                "Ключ / допуск",
-                "Открывает закрытые помещения, архивы, служебные отсеки или подтверждает ваши полномочия.",
-                Icons.Outlined.Key
-            )
-        lower.contains("книг") || lower.contains("свиток") || lower.contains("блокнот") ||
-            lower.contains("запис") || lower.contains("дневник") || lower.contains("письм") ||
-            lower.contains("конспект") ->
-            Triple(
-                "Записи / артефакт",
-                "Хранит сведения, подсказки или личные заметки — удобно изучить или показать нужному человеку.",
-                Icons.AutoMirrored.Outlined.MenuBook
-            )
-        else ->
-            Triple(
-                "Предмет инвентаря",
-                "Предмет при вас: примените его напрямую в сцене, передайте собеседнику или впишите в собственный ход.",
-                Icons.Outlined.Backpack
-            )
     }
 }
