@@ -6,6 +6,7 @@ import androidx.activity.compose.setContent
 import androidx.activity.enableEdgeToEdge
 import androidx.compose.foundation.isSystemInDarkTheme
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
@@ -16,7 +17,10 @@ import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.platform.LocalContext
 import androidx.credentials.CredentialManager
+import androidx.lifecycle.Lifecycle
+import androidx.lifecycle.LifecycleEventObserver
 import androidx.lifecycle.ViewModelProvider.AndroidViewModelFactory.Companion.APPLICATION_KEY
+import androidx.lifecycle.compose.LocalLifecycleOwner
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.lifecycle.viewmodel.compose.viewModel
 import androidx.lifecycle.viewmodel.initializer
@@ -30,7 +34,10 @@ import androidx.navigation.navArgument
 import com.example.auth.attemptAutoSignIn
 import com.example.auth.findActivity
 import com.example.auth.signOutUser
+import com.example.core.LocalRpgAudioEngine
+import com.example.core.RpgAudioEngine
 import com.example.core.configureAppCheck
+import com.example.core.describeActiveSoundscape
 import com.example.core.diagnoseAppCheckFailure
 import com.example.core.getLocalAppCheckDebugToken
 import com.example.data.repository.CampaignRepository
@@ -84,6 +91,35 @@ class MainActivity : ComponentActivity() {
             var dynamicContext by remember {
                 mutableStateOf(DynamicThemeContext(location = AppVisualLocation.AUTH))
             }
+            val audioEngine = remember { RpgAudioEngine() }
+            val lifecycleOwner = LocalLifecycleOwner.current
+
+            DisposableEffect(lifecycleOwner, audioEngine) {
+                val observer = LifecycleEventObserver { _, event ->
+                    when (event) {
+                        Lifecycle.Event.ON_START -> audioEngine.setAppForeground(true)
+                        Lifecycle.Event.ON_STOP -> audioEngine.setAppForeground(false)
+                        else -> Unit
+                    }
+                }
+                lifecycleOwner.lifecycle.addObserver(observer)
+                onDispose {
+                    lifecycleOwner.lifecycle.removeObserver(observer)
+                    audioEngine.release()
+                }
+            }
+
+            LaunchedEffect(appSettings.soundEnabled, appSettings.ostVolume, appSettings.sfxVolume) {
+                audioEngine.updateSettings(
+                    enabled = appSettings.soundEnabled,
+                    ostVol = appSettings.ostVolume,
+                    sfxVol = appSettings.sfxVolume
+                )
+            }
+
+            LaunchedEffect(dynamicContext) {
+                audioEngine.updateContext(dynamicContext)
+            }
 
             val cycleTheme: () -> Unit = {
                 val modes = PaperThemeMode.entries
@@ -92,18 +128,27 @@ class MainActivity : ComponentActivity() {
                 coroutineScope.launch { themeRepo.setThemeMode(next) }
             }
 
-            ChroniclesTheme(
-                themeMode = appSettings.themeMode,
-                dynamicContext = dynamicContext,
-                fontStyle = appSettings.fontStyle,
-                fontScale = appSettings.fontScale
-            ) {
-                AppNavigation(
-                    appSettings = appSettings,
-                    themeRepo = themeRepo,
-                    onDynamicContextChange = { dynamicContext = it },
-                    onCycleTheme = cycleTheme
-                )
+            val toggleSound: () -> Unit = {
+                val next = !appSettings.soundEnabled
+                coroutineScope.launch { themeRepo.setSoundEnabled(next) }
+            }
+
+            CompositionLocalProvider(LocalRpgAudioEngine provides audioEngine) {
+                ChroniclesTheme(
+                    themeMode = appSettings.themeMode,
+                    dynamicContext = dynamicContext,
+                    fontStyle = appSettings.fontStyle,
+                    fontScale = appSettings.fontScale
+                ) {
+                    AppNavigation(
+                        appSettings = appSettings,
+                        dynamicContext = dynamicContext,
+                        themeRepo = themeRepo,
+                        onDynamicContextChange = { dynamicContext = it },
+                        onCycleTheme = cycleTheme,
+                        onToggleSound = toggleSound
+                    )
+                }
             }
         }
     }
@@ -112,9 +157,11 @@ class MainActivity : ComponentActivity() {
 @Composable
 fun AppNavigation(
     appSettings: UserAppSettings,
+    dynamicContext: DynamicThemeContext,
     themeRepo: ThemePreferencesRepository,
     onDynamicContextChange: (DynamicThemeContext) -> Unit,
-    onCycleTheme: () -> Unit
+    onCycleTheme: () -> Unit,
+    onToggleSound: () -> Unit
 ) {
     val context = LocalContext.current
     val activityContext = remember(context) { context.findActivity() ?: context }
@@ -166,9 +213,11 @@ fun AppNavigation(
                 currentUserId = user.uid,
                 userDisplayName = user.displayName ?: user.email.orEmpty(),
                 appSettings = appSettings,
+                dynamicContext = dynamicContext,
                 themeRepo = themeRepo,
                 onDynamicContextChange = onDynamicContextChange,
                 onCycleTheme = onCycleTheme,
+                onToggleSound = onToggleSound,
                 onSignOut = {
                     signOutUser(
                         credentialManager = credentialManager,
@@ -185,9 +234,11 @@ private fun AuthenticatedNavHost(
     currentUserId: String,
     userDisplayName: String,
     appSettings: UserAppSettings,
+    dynamicContext: DynamicThemeContext,
     themeRepo: ThemePreferencesRepository,
     onDynamicContextChange: (DynamicThemeContext) -> Unit,
     onCycleTheme: () -> Unit,
+    onToggleSound: () -> Unit,
     onSignOut: () -> Unit
 ) {
     val navController = rememberNavController()
@@ -245,6 +296,8 @@ private fun AuthenticatedNavHost(
                 userDisplayName = userDisplayName,
                 themeMode = appSettings.themeMode,
                 hapticsEnabled = appSettings.hapticsEnabled,
+                soundEnabled = appSettings.soundEnabled,
+                onToggleSound = onToggleSound,
                 onCycleTheme = onCycleTheme,
                 onOpenSettings = { showSettingsSheet = true },
                 onOpenPresentation = {
@@ -335,6 +388,8 @@ private fun AuthenticatedNavHost(
             GameSessionScreen(
                 viewModel = sessionVm,
                 hapticsEnabled = appSettings.hapticsEnabled,
+                soundEnabled = appSettings.soundEnabled,
+                onToggleSound = onToggleSound,
                 onDynamicContextChange = onDynamicContextChange,
                 onOpenSettings = { showSettingsSheet = true },
                 onBack = { navController.popBackStack() }
@@ -370,6 +425,16 @@ private fun AuthenticatedNavHost(
             onToggleHaptics = { enabled ->
                 coroutineScope.launch { themeRepo.setHapticsEnabled(enabled) }
             },
+            onToggleSound = { enabled ->
+                coroutineScope.launch { themeRepo.setSoundEnabled(enabled) }
+            },
+            onOstVolumeChange = { vol ->
+                coroutineScope.launch { themeRepo.setOstVolume(vol) }
+            },
+            onSfxVolumeChange = { vol ->
+                coroutineScope.launch { themeRepo.setSfxVolume(vol) }
+            },
+            activeSoundscapeLabel = describeActiveSoundscape(dynamicContext),
             onOpenPresentation = {
                 showSettingsSheet = false
                 navController.navigate(ROUTE_PRESENTATION) {

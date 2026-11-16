@@ -41,7 +41,8 @@ data class GmTurnOutcome(
     val npcs: List<NpcRelation>,
     val newButterflyEvent: ButterflyEvent?,
     val storySummary: String,
-    val choices: List<TurnChoice>
+    val choices: List<TurnChoice>,
+    val activeQuests: List<String> = emptyList()
 ) {
     val hudLine: String
         get() = "[$hudLocation | $hudTime | $hudStatusAndInventory | $hudRelationsAndCanon]"
@@ -200,6 +201,7 @@ class CampaignRepository(
             "inventory" to openingOutcome.inventory.take(60).map { it.take(120) },
             "npcs" to openingOutcome.npcs.take(60).map { it.toFirestoreMap() },
             "butterflyEvents" to initialEvents,
+            "activeQuests" to openingOutcome.activeQuests.take(12).map { it.take(180) },
             "storySummary" to openingOutcome.storySummary.take(4000),
             "createdAt" to FieldValue.serverTimestamp(),
             "updatedAt" to FieldValue.serverTimestamp()
@@ -260,6 +262,7 @@ class CampaignRepository(
             "inventory" to outcome.inventory.take(60).map { it.take(120) },
             "npcs" to outcome.npcs.take(60).map { it.toFirestoreMap() },
             "butterflyEvents" to updatedEvents.map { it.toFirestoreMap() },
+            "activeQuests" to outcome.activeQuests.take(12).map { it.take(180) },
             "storySummary" to outcome.storySummary.take(4000),
             "updatedAt" to FieldValue.serverTimestamp()
         )

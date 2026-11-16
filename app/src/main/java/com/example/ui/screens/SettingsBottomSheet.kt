@@ -19,13 +19,17 @@ import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
+import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.automirrored.outlined.VolumeUp
 import androidx.compose.material.icons.outlined.AutoAwesome
 import androidx.compose.material.icons.outlined.CheckCircle
 import androidx.compose.material.icons.outlined.DarkMode
 import androidx.compose.material.icons.outlined.Flare
 import androidx.compose.material.icons.outlined.FormatSize
+import androidx.compose.material.icons.outlined.GraphicEq
 import androidx.compose.material.icons.outlined.LightMode
+import androidx.compose.material.icons.outlined.MusicNote
 import androidx.compose.material.icons.outlined.RadioButtonUnchecked
 import androidx.compose.material.icons.outlined.Speed
 import androidx.compose.material.icons.outlined.Tonality
@@ -36,6 +40,7 @@ import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.ModalBottomSheet
+import androidx.compose.material3.Slider
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Switch
 import androidx.compose.material3.Text
@@ -50,12 +55,15 @@ import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import com.example.core.LocalRpgAudioEngine
+import com.example.core.SfxEvent
 import com.example.data.repository.AiModelChoice
 import com.example.data.repository.PaperThemeMode
 import com.example.data.repository.ReadingFontScale
 import com.example.data.repository.ReadingFontStyle
 import com.example.data.repository.UserAppSettings
 import com.example.ui.theme.readingFontFamilyFor
+import kotlin.math.roundToInt
 
 @OptIn(ExperimentalMaterial3Api::class, ExperimentalLayoutApi::class)
 @Composable
@@ -67,10 +75,15 @@ fun SettingsBottomSheet(
     onSelectAiModel: (AiModelChoice) -> Unit,
     onToggleLiveStreaming: (Boolean) -> Unit,
     onToggleHaptics: (Boolean) -> Unit,
+    onToggleSound: (Boolean) -> Unit = {},
+    onOstVolumeChange: (Float) -> Unit = {},
+    onSfxVolumeChange: (Float) -> Unit = {},
+    activeSoundscapeLabel: String = "",
     onOpenPresentation: (() -> Unit)? = null,
     onDismiss: () -> Unit
 ) {
     val sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true)
+    val audio = LocalRpgAudioEngine.current
 
     ModalBottomSheet(
         onDismissRequest = onDismiss,
@@ -279,7 +292,126 @@ fun SettingsBottomSheet(
 
             HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant)
 
-            // 4. Streaming & Haptics Toggles
+            // 4. Streaming, Sound & Haptics
+            SettingsSectionHeader(title = "Саундтрек и звуки")
+            if (activeSoundscapeLabel.isNotBlank()) {
+                Surface(
+                    color = MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.35f),
+                    shape = RoundedCornerShape(10.dp),
+                    border = BorderStroke(1.dp, MaterialTheme.colorScheme.primary.copy(alpha = 0.25f)),
+                    modifier = Modifier.fillMaxWidth()
+                ) {
+                    Row(
+                        modifier = Modifier.padding(horizontal = 12.dp, vertical = 8.dp),
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.spacedBy(8.dp)
+                    ) {
+                        Icon(
+                            imageVector = Icons.Outlined.GraphicEq,
+                            contentDescription = null,
+                            tint = MaterialTheme.colorScheme.primary,
+                            modifier = Modifier.size(16.dp)
+                        )
+                        Text(
+                            text = "Сейчас звучит: $activeSoundscapeLabel",
+                            style = MaterialTheme.typography.labelMedium,
+                            color = MaterialTheme.colorScheme.onSurface
+                        )
+                    }
+                }
+            }
+            SettingsSwitchRow(
+                icon = Icons.AutoMirrored.Outlined.VolumeUp,
+                title = "Звук, OST и атмосфера",
+                subtitle = "Динамическая музыка, звуки погоды, эмоций и интерфейса",
+                checked = settings.soundEnabled,
+                onCheckedChange = onToggleSound,
+                testTag = "settings_sound_switch"
+            )
+            AnimatedVisibility(visible = settings.soundEnabled) {
+                Surface(
+                    color = MaterialTheme.colorScheme.background,
+                    shape = RoundedCornerShape(12.dp),
+                    border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant),
+                    modifier = Modifier.fillMaxWidth()
+                ) {
+                    Column(
+                        modifier = Modifier.padding(horizontal = 14.dp, vertical = 10.dp),
+                        verticalArrangement = Arrangement.spacedBy(6.dp)
+                    ) {
+                        Row(
+                            modifier = Modifier.fillMaxWidth(),
+                            horizontalArrangement = Arrangement.SpaceBetween,
+                            verticalAlignment = Alignment.CenterVertically
+                        ) {
+                            Row(
+                                verticalAlignment = Alignment.CenterVertically,
+                                horizontalArrangement = Arrangement.spacedBy(6.dp)
+                            ) {
+                                Icon(
+                                    imageVector = Icons.Outlined.MusicNote,
+                                    contentDescription = null,
+                                    tint = MaterialTheme.colorScheme.primary,
+                                    modifier = Modifier.size(16.dp)
+                                )
+                                Text(
+                                    text = "Громкость OST",
+                                    style = MaterialTheme.typography.labelLarge
+                                )
+                            }
+                            Text(
+                                text = "${(settings.ostVolume * 100f).roundToInt()}%",
+                                style = MaterialTheme.typography.labelMedium,
+                                color = MaterialTheme.colorScheme.primary
+                            )
+                        }
+                        Slider(
+                            value = settings.ostVolume,
+                            onValueChange = onOstVolumeChange,
+                            valueRange = 0f..1f,
+                            modifier = Modifier.testTag("settings_ost_slider")
+                        )
+
+                        Row(
+                            modifier = Modifier.fillMaxWidth(),
+                            horizontalArrangement = Arrangement.SpaceBetween,
+                            verticalAlignment = Alignment.CenterVertically
+                        ) {
+                            Row(
+                                verticalAlignment = Alignment.CenterVertically,
+                                horizontalArrangement = Arrangement.spacedBy(6.dp)
+                            ) {
+                                Icon(
+                                    imageVector = Icons.Outlined.GraphicEq,
+                                    contentDescription = null,
+                                    tint = MaterialTheme.colorScheme.secondary,
+                                    modifier = Modifier.size(16.dp)
+                                )
+                                Text(
+                                    text = "Погода и эффекты (SFX)",
+                                    style = MaterialTheme.typography.labelLarge
+                                )
+                            }
+                            Text(
+                                text = "${(settings.sfxVolume * 100f).roundToInt()}%",
+                                style = MaterialTheme.typography.labelMedium,
+                                color = MaterialTheme.colorScheme.secondary
+                            )
+                        }
+                        Slider(
+                            value = settings.sfxVolume,
+                            onValueChange = onSfxVolumeChange,
+                            onValueChangeFinished = { audio?.playSfx(SfxEvent.UI_TAP) },
+                            valueRange = 0f..1f,
+                            modifier = Modifier.testTag("settings_sfx_slider")
+                        )
+                    }
+                }
+            }
+
+            HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant)
+
+            // 5. Streaming & Haptics Toggles
             SettingsSectionHeader(title = "Погружение и комфорт")
             SettingsSwitchRow(
                 icon = Icons.Outlined.Speed,

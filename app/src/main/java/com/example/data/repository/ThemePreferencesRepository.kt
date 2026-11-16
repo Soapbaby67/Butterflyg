@@ -3,6 +3,7 @@ package com.example.data.repository
 import android.content.Context
 import androidx.datastore.preferences.core.booleanPreferencesKey
 import androidx.datastore.preferences.core.edit
+import androidx.datastore.preferences.core.floatPreferencesKey
 import androidx.datastore.preferences.core.stringPreferencesKey
 import androidx.datastore.preferences.preferencesDataStore
 import kotlinx.coroutines.flow.Flow
@@ -82,7 +83,10 @@ data class UserAppSettings(
     val fontStyle: ReadingFontStyle = ReadingFontStyle.LITERATA,
     val fontScale: ReadingFontScale = ReadingFontScale.NORMAL,
     val liveStreamingEnabled: Boolean = true,
-    val hapticsEnabled: Boolean = true
+    val hapticsEnabled: Boolean = true,
+    val soundEnabled: Boolean = true,
+    val ostVolume: Float = 0.65f,
+    val sfxVolume: Float = 0.80f
 )
 
 internal val Context.themeDataStore by preferencesDataStore(name = "chronicles_preferences")
@@ -94,6 +98,9 @@ class ThemePreferencesRepository(private val context: Context) {
     private val fontScaleKey = stringPreferencesKey("reading_font_scale")
     private val liveStreamingKey = booleanPreferencesKey("live_streaming_enabled")
     private val hapticsKey = booleanPreferencesKey("haptics_enabled")
+    private val soundEnabledKey = booleanPreferencesKey("sound_enabled")
+    private val ostVolumeKey = floatPreferencesKey("sound_ost_volume")
+    private val sfxVolumeKey = floatPreferencesKey("sound_sfx_volume")
 
     val settings: Flow<UserAppSettings> = context.themeDataStore.data.map { prefs ->
         UserAppSettings(
@@ -102,7 +109,10 @@ class ThemePreferencesRepository(private val context: Context) {
             fontStyle = ReadingFontStyle.fromKey(prefs[fontStyleKey]),
             fontScale = ReadingFontScale.fromKey(prefs[fontScaleKey]),
             liveStreamingEnabled = prefs[liveStreamingKey] ?: true,
-            hapticsEnabled = prefs[hapticsKey] ?: true
+            hapticsEnabled = prefs[hapticsKey] ?: true,
+            soundEnabled = prefs[soundEnabledKey] ?: true,
+            ostVolume = (prefs[ostVolumeKey] ?: 0.65f).coerceIn(0f, 1f),
+            sfxVolume = (prefs[sfxVolumeKey] ?: 0.80f).coerceIn(0f, 1f)
         )
     }
 
@@ -141,6 +151,24 @@ class ThemePreferencesRepository(private val context: Context) {
     suspend fun setHapticsEnabled(enabled: Boolean) {
         context.themeDataStore.edit { prefs ->
             prefs[hapticsKey] = enabled
+        }
+    }
+
+    suspend fun setSoundEnabled(enabled: Boolean) {
+        context.themeDataStore.edit { prefs ->
+            prefs[soundEnabledKey] = enabled
+        }
+    }
+
+    suspend fun setOstVolume(volume: Float) {
+        context.themeDataStore.edit { prefs ->
+            prefs[ostVolumeKey] = volume.coerceIn(0f, 1f)
+        }
+    }
+
+    suspend fun setSfxVolume(volume: Float) {
+        context.themeDataStore.edit { prefs ->
+            prefs[sfxVolumeKey] = volume.coerceIn(0f, 1f)
         }
     }
 }

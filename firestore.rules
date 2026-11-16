@@ -52,6 +52,7 @@ service cloud.firestore {
              data.inventory is list && data.inventory.size() <= 60 && (data.inventory.size() == 0 || data.inventory[0] is string) &&
              data.npcs is list && data.npcs.size() <= 60 && (data.npcs.size() == 0 || data.npcs[0] is map) &&
              data.butterflyEvents is list && data.butterflyEvents.size() <= 60 && (data.butterflyEvents.size() == 0 || data.butterflyEvents[0] is map) &&
+             (!data.keys().hasAny(['activeQuests']) || (data.activeQuests is list && data.activeQuests.size() <= 12 && (data.activeQuests.size() == 0 || data.activeQuests[0] is string))) &&
              data.storySummary is string && data.storySummary.size() <= 4000;
     }
 
@@ -84,8 +85,8 @@ service cloud.firestore {
                          'userId', 'title', 'universe', 'characterSummary', 'startingPoint',
                          'toneAndDifficulty', 'turnCount', 'hudLocation', 'hudTime',
                          'hudStatusAndInventory', 'hudRelationsAndCanon', 'canonDeviationPercent',
-                         'activeNpc', 'inventory', 'npcs', 'butterflyEvents', 'storySummary',
-                         'createdAt', 'updatedAt'
+                         'activeNpc', 'inventory', 'npcs', 'butterflyEvents', 'activeQuests',
+                         'storySummary', 'createdAt', 'updatedAt'
                        ]) &&
                        incoming().createdAt is timestamp && incoming().createdAt <= request.time &&
                        incoming().updatedAt is timestamp && incoming().updatedAt <= request.time &&
@@ -101,8 +102,8 @@ service cloud.firestore {
                        incoming().diff(existing()).affectedKeys().hasOnly([
                          'title', 'turnCount', 'hudLocation', 'hudTime',
                          'hudStatusAndInventory', 'hudRelationsAndCanon', 'canonDeviationPercent',
-                         'activeNpc', 'inventory', 'npcs', 'butterflyEvents', 'storySummary',
-                         'updatedAt'
+                         'activeNpc', 'inventory', 'npcs', 'butterflyEvents', 'activeQuests',
+                         'storySummary', 'updatedAt'
                        ]);
 
       allow delete: if isSignedIn() && request.auth.uid == userId && isValidId(campaignId);

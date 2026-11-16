@@ -4,6 +4,8 @@ import com.example.base.FirestoreEmulatorTestBase
 import com.example.data.model.ButterflyEvent
 import com.example.data.model.NpcEmotionSnapshot
 import com.example.data.model.NpcRelation
+import com.example.data.model.RiskOutcome
+import com.example.data.model.RiskOutcomeTier
 import com.example.data.model.SessionSetupInput
 import com.example.data.model.TurnChoice
 import com.google.firebase.firestore.FirebaseFirestoreException
@@ -43,6 +45,7 @@ class CampaignRepositoryRuleTest : FirestoreEmulatorTestBase() {
             note = "Неловко потирает затылок."
         ),
         inventory = listOf("Кунай", "Карта Конохи"),
+        activeQuests = listOf("Найти свиток в архиве", "Завоевать доверие Ируки"),
         npcs = listOf(
             NpcRelation(
                 name = "Ирука Умино",
@@ -62,7 +65,17 @@ class CampaignRepositoryRuleTest : FirestoreEmulatorTestBase() {
         storySummary = "Герой прибыл в Коноху и заговорил с Ирукой.",
         choices = listOf(
             TurnChoice("1", "Дипломатический", "Поговорить о расписании экзамена"),
-            TurnChoice("2", "Скрытный", "Ускользнуть в архив")
+            TurnChoice(
+                id = "2",
+                approach = "Рискованный",
+                text = "Пробраться в запечатанный архив",
+                isRisky = true,
+                riskOutcomes = listOf(
+                    RiskOutcome("r1", "Удача", "Выкрасть свиток без тревоги", RiskOutcomeTier.TRIUMPH.key, 25L),
+                    RiskOutcome("r2", "Компромисс", "Уйти со свитком, но оставить след", RiskOutcomeTier.MIXED.key, 50L),
+                    RiskOutcome("r3", "Провал", "Попасться страже", RiskOutcomeTier.SETBACK.key, 25L)
+                )
+            )
         )
     )
 
@@ -87,6 +100,7 @@ class CampaignRepositoryRuleTest : FirestoreEmulatorTestBase() {
         val campaign = campaigns.first { it.id == createdId }
         assertEquals("Ирука Умино", campaign.activeNpc.name)
         assertEquals("embarrassment", campaign.activeNpc.emotionCategory)
+        assertEquals(listOf("Найти свиток в архиве", "Завоевать доверие Ируки"), campaign.activeQuests)
 
         withTimeout(DEFAULT_TIMEOUT_MS) {
             repository.recordTurn(campaign, "Спросить про список команд", sampleOutcome(2L))
@@ -97,6 +111,9 @@ class CampaignRepositoryRuleTest : FirestoreEmulatorTestBase() {
         }
         assertEquals(2, turns.size)
         assertEquals(2L, turns.last().turnNumber)
+        val riskyChoice = turns.last().choices.first { it.id == "2" }
+        assertTrue(riskyChoice.isRisky)
+        assertEquals(3, riskyChoice.riskOutcomes.size)
 
         withTimeout(DEFAULT_TIMEOUT_MS) {
             repository.deleteCampaign(createdId)

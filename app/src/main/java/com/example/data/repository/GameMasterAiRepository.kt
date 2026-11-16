@@ -7,6 +7,8 @@ import com.example.data.model.CampaignTurn
 import com.example.data.model.EmotionCategory
 import com.example.data.model.NpcEmotionSnapshot
 import com.example.data.model.NpcRelation
+import com.example.data.model.RiskOutcome
+import com.example.data.model.RiskOutcomeTier
 import com.example.data.model.SessionSetupInput
 import com.example.data.model.TurnChoice
 import com.google.firebase.Firebase
@@ -372,18 +374,36 @@ class GameMasterAiRepository(
             "butterflyEventConsequence" to Schema.string(description = "Описание долгосрочного последствия для сюжета"),
             "butterflyEventImpact" to Schema.enumeration(values = listOf("minor", "major", "critical")),
             "storySummary" to Schema.string(description = "Обновлённое краткое резюме сюжета кампании (2-5 предложений)"),
+            "activeQuests" to Schema.array(
+                items = Schema.string(),
+                description = "1-3 актуальные цели/зацепки героя на текущий момент (коротко, до 90 символов)"
+            ),
             "choices" to Schema.array(
                 items = Schema.obj(
                     properties = mapOf(
                         "id" to Schema.string(),
                         "approach" to Schema.string(description = "Подход под жанр сцены: Силовой, Дипломатический, Скрытный, Нестандартный, Романтический, Заботливый, Бытовой, Эмоциональный или Дерзкий"),
-                        "text" to Schema.string(description = "Краткое описание действия игрока на русском языке")
-                    )
+                        "text" to Schema.string(description = "Краткое описание действия игрока на русском языке"),
+                        "isRisky" to Schema.boolean(description = "true, если выбор сопряжён с риском, авантюрой, боем, скрытностью или смелым шагом"),
+                        "riskOutcomes" to Schema.array(
+                            items = Schema.obj(
+                                properties = mapOf(
+                                    "id" to Schema.string(),
+                                    "label" to Schema.string(description = "Короткое название исхода (2-4 слова)"),
+                                    "description" to Schema.string(description = "Что конкретно произойдёт при этом исходе (до 130 символов)"),
+                                    "tier" to Schema.enumeration(values = listOf("triumph", "mixed", "setback", "twist")),
+                                    "weight" to Schema.integer(description = "Вероятность/вес исхода от 10 до 50 (в сумме ~100)")
+                                )
+                            ),
+                            description = "Если isRisky=true, дай 3 или 4 яркие развилки исхода (триумф, с ценой, срыв, поворот)"
+                        )
+                    ),
+                    optionalProperties = listOf("isRisky", "riskOutcomes")
                 ),
                 description = "3 или 4 принципиально разных варианта действий игрока"
             )
         ),
-        optionalProperties = listOf("currencyLabel", "activeNpcArchetype", "sceneWeather")
+        optionalProperties = listOf("currencyLabel", "activeNpcArchetype", "sceneWeather", "activeQuests")
     )
 
     private val systemPrompt = content {
@@ -399,11 +419,11 @@ class GameMasterAiRepository(
                - Медленный слоубёрн: незнакомец стартует с trustLevel около -10..+15. Один удачный разговор даёт +2..+8, не больше. Настоящая симпатия и доверие зарабатываются постепенно через множество сцен, поступков и преодоление трений характеров.
                - Обязательно задавай каждому важному NPC поля "personality" и "boundaries" в JSON при знакомстве и строго придерживайся их дальше.
             3. Жанр и реализм: строго придерживайся выбранного тона. В боевом или мрачном сеттинге — нет сюжетной брони, ошибки ведут к травмам. В романтике и повседневной рутине — не выдумывай искусственные катастрофы на пустом месте; делай ставку на живые диалоги, бытовые детали, бюджет, неловкие паузы и конфликт интересов.
-            4. Эффект бабочки: любое вмешательство или слово игрока способно необратимо изменить сюжет или отношения. Персонажи помнят прошлые промахи и удачи.
+            4. Эффект бабочки и цели: любое вмешательство или слово игрока способно необратимо изменить сюжет или отношения. Персонажи помнят прошлые промахи и удачи. Веди 1–3 текущие цели в "activeQuests".
             5. Динамика и темп: пиши ярко, литературно, живо, но без «воды». 2–4 выразительных абзаца в каждом ходе. В JSON-ответе ВСЕГДА первым полем выдавай "narrative", чтобы игрок сразу видел живой текст.
             6. Эмоции NPC: при любом контакте с персонажем обязательно заполняй activeNpc (hasActiveNpc = true), указывая его точную эмоцию (например: Скепсис, Раздражение, Сдержанная улыбка, Смущение, Усталость, Подозрение, Теплота), интенсивность (1–5) и краткое наблюдение за мимикой/взглядом/интонацией.
             7. Предметы и контекст: если игрок использует или показывает предмет из инвентаря, обязательно учитывай этот предмет в сцене и при необходимости обновляй инвентарь. Обязательно учитывай блок «ЗАКРЕПЛЁННЫЕ ФАКТЫ ИГРОКА», если он передан.
-            8. Варианты действий: всегда предлагай 3–4 принципиально разных варианта с подходящими к жанру тегами подхода (Силовой, Дипломатический, Скрытный, Нестандартный, Романтический, Заботливый, Бытовой, Эмоциональный, Дерзкий).
+            8. Варианты действий и рискованные развилки: всегда предлагай 3–4 принципиально разных варианта с подходящими к жанру тегами подхода (Силовой, Дипломатический, Скрытный, Нестандартный, Романтический, Заботливый, Бытовой, Эмоциональный, Дерзкий). Для 1–2 рискованных/дерзких/скрытных вариантов ставь "isRisky": true и заполняй 3–4 исхода в "riskOutcomes" (triumph, mixed, setback, twist). Если в действии игрока есть блок «[Бросок судьбы • ...]» — строй сцену строго по выпавшему исходу!
             9. Язык: весь ответ исключительно на русском языке (кроме перечислений enum, требуемых схемой).
             """.trimIndent()
         )
@@ -754,7 +774,7 @@ class GameMasterAiRepository(
         targetModel.generateContent(prompt).text.orEmpty().trim()
     }
 
-    private fun parseTurnOutcome(
+    internal fun parseTurnOutcome(
         jsonString: String,
         turnNumber: Long,
         previousNpcs: List<NpcRelation> = emptyList()
@@ -866,16 +886,49 @@ class GameMasterAiRepository(
                     val obj = choicesArray.optJSONObject(i) ?: continue
                     val text = obj.optString("text").trim()
                     if (text.isBlank()) continue
+                    val outcomesArray = obj.optJSONArray("riskOutcomes")
+                    val parsedOutcomes = buildList {
+                        if (outcomesArray != null) {
+                            for (j in 0 until outcomesArray.length()) {
+                                val oObj = outcomesArray.optJSONObject(j) ?: continue
+                                val oLabel = oObj.optString("label").trim()
+                                val oDesc = oObj.optString("description").trim()
+                                if (oLabel.isBlank() || oDesc.isBlank()) continue
+                                add(
+                                    RiskOutcome(
+                                        id = oObj.optString("id").ifBlank { "outcome_${j + 1}" },
+                                        label = oLabel,
+                                        description = oDesc,
+                                        tier = RiskOutcomeTier.fromKey(oObj.optString("tier")).key,
+                                        weight = oObj.optLong("weight", 25L).coerceIn(5L, 80L)
+                                    )
+                                )
+                            }
+                        }
+                    }.take(4)
+                    val isRisky = obj.optBoolean("isRisky", false) || parsedOutcomes.size >= 2
                     add(
                         TurnChoice(
                             id = obj.optString("id").ifBlank { (i + 1).toString() },
                             approach = obj.optString("approach").trim().ifBlank { "Действие" },
-                            text = text
+                            text = text,
+                            isRisky = isRisky,
+                            riskOutcomes = parsedOutcomes
                         )
                     )
                 }
             }
         }
+
+        val questsArray = root.optJSONArray("activeQuests")
+        val activeQuests = buildList {
+            if (questsArray != null) {
+                for (i in 0 until questsArray.length()) {
+                    val q = questsArray.optString(i).trim()
+                    if (q.isNotBlank()) add(q.take(160))
+                }
+            }
+        }.take(6)
 
         val healthPercent = root.optLong("healthPercent", 100L).coerceIn(0L, 100L)
         val healthStatus = root.optString("healthStatus").trim()
@@ -930,7 +983,8 @@ class GameMasterAiRepository(
             npcs = npcs,
             newButterflyEvent = butterflyEvent,
             storySummary = root.optString("storySummary").trim(),
-            choices = choices
+            choices = choices,
+            activeQuests = activeQuests
         )
     }
 

@@ -46,6 +46,7 @@ import androidx.compose.material.icons.automirrored.outlined.MenuBook
 import androidx.compose.material.icons.outlined.Analytics
 import androidx.compose.material.icons.outlined.AutoAwesome
 import androidx.compose.material.icons.outlined.Bolt
+import androidx.compose.material.icons.outlined.Casino
 import androidx.compose.material.icons.outlined.ChevronLeft
 import androidx.compose.material.icons.outlined.ChevronRight
 import androidx.compose.material.icons.outlined.EditNote
@@ -65,6 +66,7 @@ import androidx.compose.material.icons.outlined.Whatshot
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.FilledIconButton
+import androidx.compose.material3.FilledTonalIconToggleButton
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
@@ -110,14 +112,19 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.example.R
+import com.example.core.LocalRpgAudioEngine
+import com.example.core.SfxEvent
 import com.example.core.rememberRpgHaptics
 import com.example.data.model.CampaignTurn
 import com.example.data.model.EmotionCategory
+import com.example.data.model.RiskyChoiceResolver
 import com.example.data.model.TurnChoice
 import com.example.ui.components.HudStatsParser
 import com.example.ui.components.ItemActionSheet
 import com.example.ui.components.ItemPictureTile
 import com.example.ui.components.NpcEmotionCard
+import com.example.ui.components.RiskyOutcomeRouletteSheet
+import com.example.ui.components.SoundToggleButton
 import com.example.ui.components.StatsAndInventoryContent
 import com.example.ui.components.WeatherCanvasOverlay
 import com.example.ui.components.weatherIconFor
@@ -140,6 +147,8 @@ import kotlinx.coroutines.launch
 fun GameSessionScreen(
     viewModel: GameSessionViewModel,
     hapticsEnabled: Boolean,
+    soundEnabled: Boolean = true,
+    onToggleSound: () -> Unit = {},
     onDynamicContextChange: (DynamicThemeContext) -> Unit = {},
     onOpenSettings: () -> Unit,
     onBack: () -> Unit
@@ -148,11 +157,14 @@ fun GameSessionScreen(
     val submissionState by viewModel.submissionState.collectAsStateWithLifecycle()
     val facts by viewModel.facts.collectAsStateWithLifecycle()
     val haptics = rememberRpgHaptics(hapticsEnabled)
+    val audio = LocalRpgAudioEngine.current
 
     var customActionText by rememberSaveable { mutableStateOf("") }
+    var isCustomActionRisky by rememberSaveable { mutableStateOf(false) }
     var showHistoryTurns by rememberSaveable { mutableStateOf(false) }
     var codexTab by rememberSaveable { mutableIntStateOf(0) }
     var selectedItemForAction by remember { mutableStateOf<String?>(null) }
+    var pendingRiskyChoice by remember { mutableStateOf<TurnChoice?>(null) }
     val listState = rememberLazyListState()
     val coroutineScope = rememberCoroutineScope()
     // Page 0 = Stats & Inventory (swipe right from center)
@@ -202,27 +214,49 @@ fun GameSessionScreen(
         )
     }
 
-    // Haptic feedback when new turn arrives or butterfly event triggers
+    // Haptic & SFX feedback when new turn arrives, NPC emotion shifts, or butterfly event triggers
     var lastTurnCount by rememberSaveable(successData?.campaign?.id) {
         mutableStateOf<Long?>(null)
     }
     var lastButterflyCount by rememberSaveable(successData?.campaign?.id) {
         mutableStateOf<Int?>(null)
     }
+    var lastEmotionKey by rememberSaveable(successData?.campaign?.id) {
+        mutableStateOf<String?>(null)
+    }
+    var lastPagerPage by remember { mutableIntStateOf(1) }
 
-    LaunchedEffect(successData?.campaign?.turnCount, successData?.campaign?.butterflyEvents?.size) {
+    LaunchedEffect(pagerState.currentPage) {
+        if (pagerState.currentPage != lastPagerPage) {
+            lastPagerPage = pagerState.currentPage
+            audio?.playSfx(SfxEvent.SWIPE_WHOOSH)
+        }
+    }
+
+    LaunchedEffect(
+        successData?.campaign?.turnCount,
+        successData?.campaign?.butterflyEvents?.size,
+        successData?.campaign?.activeNpc?.emotionCategory
+    ) {
         val campaign = successData?.campaign ?: return@LaunchedEffect
         val prevTurns = lastTurnCount
         val prevButterflies = lastButterflyCount
+        val prevEmotion = lastEmotionKey
+        val currEmotion = campaign.activeNpc.emotionCategory
         if (prevTurns != null && prevButterflies != null) {
             if (campaign.butterflyEvents.size > prevButterflies) {
                 haptics.butterflyShift()
+                audio?.playSfx(SfxEvent.BUTTERFLY_SHIFT)
             } else if (campaign.turnCount > prevTurns) {
                 haptics.impactConfirm()
+                audio?.playSfx(SfxEvent.AI_REVEAL)
+            } else if (prevEmotion != null && prevEmotion != currEmotion && campaign.activeNpc.hasActiveNpc) {
+                audio?.playSfx(SfxEvent.EMOTION_SHIFT)
             }
         }
         lastTurnCount = campaign.turnCount
         lastButterflyCount = campaign.butterflyEvents.size
+        lastEmotionKey = currEmotion
     }
 
     LaunchedEffect(successData?.turns?.size, submissionState is TurnSubmissionState.Generating) {
@@ -398,9 +432,18 @@ fun GameSessionScreen(
                                 )
                             }
                         }
+                        SoundToggleButton(
+                            soundEnabled = soundEnabled,
+                            onToggleSound = {
+                                haptics.tap()
+                                audio?.playSfx(SfxEvent.UI_TAP)
+                                onToggleSound()
+                            }
+                        )
                         IconButton(
                             onClick = {
                                 haptics.tap()
+                                audio?.playSfx(SfxEvent.UI_TAP)
                                 onOpenSettings()
                             },
                             modifier = Modifier
@@ -530,6 +573,18 @@ fun GameSessionScreen(
                                     }
                                 }
 
+                                AnimatedVisibility(visible = isCustomActionRisky) {
+                                    Text(
+                                        text = "Режим рулетки: при отправке появятся возможные развилки исхода",
+                                        style = MaterialTheme.typography.labelSmall,
+                                        color = universePalette.choiceForceColor,
+                                        modifier = Modifier
+                                            .fillMaxWidth()
+                                            .widthIn(max = 680.dp)
+                                            .padding(bottom = 6.dp)
+                                    )
+                                }
+
                                 Row(
                                     verticalAlignment = Alignment.CenterVertically,
                                     horizontalArrangement = Arrangement.spacedBy(8.dp),
@@ -552,9 +607,19 @@ fun GameSessionScreen(
                                             onSend = {
                                                 if (customActionText.isNotBlank()) {
                                                     haptics.tap()
-                                                    val text = customActionText
-                                                    customActionText = ""
-                                                    viewModel.submitPlayerAction(text)
+                                                    if (isCustomActionRisky) {
+                                                        audio?.playSfx(SfxEvent.UI_TAP)
+                                                        pendingRiskyChoice = RiskyChoiceResolver.buildCustomRiskChoice(
+                                                            actionText = customActionText,
+                                                            activeNpcName = successData.campaign.activeNpc.name
+                                                                .takeIf { successData.campaign.activeNpc.hasActiveNpc }
+                                                        )
+                                                    } else {
+                                                        audio?.playSfx(SfxEvent.SEND_ACTION)
+                                                        val text = customActionText
+                                                        customActionText = ""
+                                                        viewModel.submitPlayerAction(text)
+                                                    }
                                                 }
                                             }
                                         ),
@@ -562,17 +627,57 @@ fun GameSessionScreen(
                                             .weight(1f)
                                             .testTag("custom_action_input")
                                     )
+                                    FilledTonalIconToggleButton(
+                                        checked = isCustomActionRisky,
+                                        onCheckedChange = {
+                                            haptics.tap()
+                                            audio?.playSfx(SfxEvent.UI_TAP)
+                                            isCustomActionRisky = it
+                                        },
+                                        enabled = submissionState !is TurnSubmissionState.Generating,
+                                        modifier = Modifier
+                                            .size(48.dp)
+                                            .testTag("custom_action_risk_toggle")
+                                    ) {
+                                        Icon(
+                                            imageVector = Icons.Outlined.Casino,
+                                            contentDescription = if (isCustomActionRisky) {
+                                                "Выключить рулетку риска"
+                                            } else {
+                                                "Сделать ход рискованным (показать развилки)"
+                                            },
+                                            tint = if (isCustomActionRisky) {
+                                                universePalette.choiceForceColor
+                                            } else {
+                                                MaterialTheme.colorScheme.onSurfaceVariant
+                                            }
+                                        )
+                                    }
                                     FilledIconButton(
                                         onClick = {
                                             haptics.tap()
-                                            val text = customActionText
-                                            customActionText = ""
-                                            viewModel.submitPlayerAction(text)
+                                            if (isCustomActionRisky) {
+                                                audio?.playSfx(SfxEvent.UI_TAP)
+                                                pendingRiskyChoice = RiskyChoiceResolver.buildCustomRiskChoice(
+                                                    actionText = customActionText,
+                                                    activeNpcName = successData.campaign.activeNpc.name
+                                                        .takeIf { successData.campaign.activeNpc.hasActiveNpc }
+                                                )
+                                            } else {
+                                                audio?.playSfx(SfxEvent.SEND_ACTION)
+                                                val text = customActionText
+                                                customActionText = ""
+                                                viewModel.submitPlayerAction(text)
+                                            }
                                         },
                                         enabled = customActionText.isNotBlank() &&
                                             submissionState !is TurnSubmissionState.Generating,
                                         colors = IconButtonDefaults.filledIconButtonColors(
-                                            containerColor = dynamicSpec.accentPrimary,
+                                            containerColor = if (isCustomActionRisky) {
+                                                universePalette.choiceForceColor
+                                            } else {
+                                                dynamicSpec.accentPrimary
+                                            },
                                             contentColor = MaterialTheme.colorScheme.onPrimary
                                         ),
                                         modifier = Modifier
@@ -580,7 +685,11 @@ fun GameSessionScreen(
                                             .testTag("send_custom_action_button")
                                     ) {
                                         Icon(
-                                            imageVector = Icons.AutoMirrored.Filled.Send,
+                                            imageVector = if (isCustomActionRisky) {
+                                                Icons.Outlined.Casino
+                                            } else {
+                                                Icons.AutoMirrored.Filled.Send
+                                            },
                                             contentDescription = stringResource(R.string.send_action)
                                         )
                                     }
@@ -880,12 +989,22 @@ fun GameSessionScreen(
                                                                 )
                                                             }
                                                             latestTurn.choices.forEach { choice ->
+                                                                val isRisky = remember(choice) {
+                                                                    RiskyChoiceResolver.isChoiceRisky(choice)
+                                                                }
                                                                 ChoiceActionCard(
                                                                     choice = choice,
+                                                                    isRisky = isRisky,
                                                                     palette = universePalette,
                                                                     onClick = {
                                                                         haptics.tap()
-                                                                        viewModel.submitPlayerAction(choice.text)
+                                                                        if (isRisky) {
+                                                                            audio?.playSfx(SfxEvent.UI_TAP)
+                                                                            pendingRiskyChoice = choice
+                                                                        } else {
+                                                                            audio?.playSfx(SfxEvent.SEND_ACTION)
+                                                                            viewModel.submitPlayerAction(choice.text)
+                                                                        }
                                                                     }
                                                                 )
                                                             }
@@ -914,23 +1033,28 @@ fun GameSessionScreen(
                                             ) {
                                                 CodexContent(
                                                     campaign = data.campaign,
+                                                    turns = data.turns,
                                                     facts = facts,
                                                     selectedTab = codexTab,
                                                     onTabSelect = { codexTab = it },
                                                     onAddFact = { text ->
                                                         haptics.tap()
+                                                        audio?.playSfx(SfxEvent.UI_TAP)
                                                         viewModel.addFact(text)
                                                     },
                                                     onToggleFactPinned = { id ->
                                                         haptics.tap()
+                                                        audio?.playSfx(SfxEvent.UI_TAP)
                                                         viewModel.toggleFactPinned(id)
                                                     },
                                                     onDeleteFact = { id ->
                                                         haptics.tap()
+                                                        audio?.playSfx(SfxEvent.UI_TAP)
                                                         viewModel.deleteFact(id)
                                                     },
                                                     onItemClick = { item ->
                                                         haptics.tap()
+                                                        audio?.playSfx(SfxEvent.ITEM_USE)
                                                         selectedItemForAction = item
                                                     },
                                                     modifier = Modifier
@@ -968,16 +1092,19 @@ fun GameSessionScreen(
             onDismiss = { selectedItemForAction = null },
             onUseInScene = { item ->
                 haptics.impactConfirm()
+                audio?.playSfx(SfxEvent.ITEM_USE)
                 coroutineScope.launch { pagerState.animateScrollToPage(1) }
                 viewModel.submitPlayerAction("Использовать предмет из инвентаря: «$item» в текущей ситуации.")
             },
             onGiveToNpc = { item, npcName ->
                 haptics.impactConfirm()
+                audio?.playSfx(SfxEvent.ITEM_USE)
                 coroutineScope.launch { pagerState.animateScrollToPage(1) }
                 viewModel.submitPlayerAction("Показать или передать предмет «$item» персонажу $npcName.")
             },
             onInsertIntoDraft = { item ->
                 haptics.tap()
+                audio?.playSfx(SfxEvent.UI_TAP)
                 val addition = "Использую предмет «$item» — "
                 customActionText = if (customActionText.isBlank()) {
                     addition
@@ -985,6 +1112,28 @@ fun GameSessionScreen(
                     "${customActionText.trimEnd()} ($item) "
                 }
                 coroutineScope.launch { pagerState.animateScrollToPage(1) }
+            }
+        )
+    }
+
+    val activeRiskChoice = pendingRiskyChoice
+    if (activeRiskChoice != null && successData != null) {
+        val activeNpcName = successData.campaign.activeNpc.name
+            .takeIf { successData.campaign.activeNpc.hasActiveNpc && it.isNotBlank() }
+        RiskyOutcomeRouletteSheet(
+            choice = activeRiskChoice,
+            activeNpcName = activeNpcName,
+            palette = universePalette,
+            haptics = haptics,
+            onDismiss = { pendingRiskyChoice = null },
+            onOutcomeResolved = { outcome ->
+                val prompt = RiskyChoiceResolver.formatOutcomePrompt(activeRiskChoice.text, outcome)
+                if (activeRiskChoice.id == "custom_risk") {
+                    customActionText = ""
+                    isCustomActionRisky = false
+                }
+                pendingRiskyChoice = null
+                viewModel.submitPlayerAction(prompt)
             }
         )
     }
@@ -1453,6 +1602,7 @@ private fun GeneratingNarrativeWindow(
 @Composable
 private fun ChoiceActionCard(
     choice: TurnChoice,
+    isRisky: Boolean,
     palette: UniverseVisualPalette,
     onClick: () -> Unit
 ) {
@@ -1461,7 +1611,14 @@ private fun ChoiceActionCard(
     Surface(
         color = MaterialTheme.colorScheme.surface.copy(alpha = 0.88f),
         shape = MaterialTheme.shapes.medium,
-        border = BorderStroke(1.dp, approachColor.copy(alpha = 0.42f)),
+        border = BorderStroke(
+            width = if (isRisky) 1.3.dp else 1.dp,
+            color = if (isRisky) {
+                palette.choiceForceColor.copy(alpha = 0.52f)
+            } else {
+                approachColor.copy(alpha = 0.42f)
+            }
+        ),
         tonalElevation = 3.dp,
         modifier = Modifier
             .fillMaxWidth()
@@ -1488,27 +1645,61 @@ private fun ChoiceActionCard(
                     .padding(horizontal = 14.dp, vertical = 12.dp),
                 verticalArrangement = Arrangement.spacedBy(6.dp)
             ) {
-                if (choice.approach.isNotBlank()) {
-                    Surface(
-                        color = approachColor.copy(alpha = 0.16f),
-                        contentColor = approachColor,
-                        shape = RoundedCornerShape(999.dp)
-                    ) {
-                        Row(
-                            verticalAlignment = Alignment.CenterVertically,
-                            horizontalArrangement = Arrangement.spacedBy(5.dp),
-                            modifier = Modifier.padding(horizontal = 9.dp, vertical = 3.dp)
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.SpaceBetween,
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    if (choice.approach.isNotBlank()) {
+                        Surface(
+                            color = approachColor.copy(alpha = 0.16f),
+                            contentColor = approachColor,
+                            shape = RoundedCornerShape(999.dp)
                         ) {
-                            Icon(
-                                imageVector = approachIcon,
-                                contentDescription = null,
-                                modifier = Modifier.size(13.dp)
-                            )
-                            Text(
-                                text = choice.approach,
-                                style = MaterialTheme.typography.labelSmall,
-                                fontWeight = FontWeight.SemiBold
-                            )
+                            Row(
+                                verticalAlignment = Alignment.CenterVertically,
+                                horizontalArrangement = Arrangement.spacedBy(5.dp),
+                                modifier = Modifier.padding(horizontal = 9.dp, vertical = 3.dp)
+                            ) {
+                                Icon(
+                                    imageVector = approachIcon,
+                                    contentDescription = null,
+                                    modifier = Modifier.size(13.dp)
+                                )
+                                Text(
+                                    text = choice.approach,
+                                    style = MaterialTheme.typography.labelSmall,
+                                    fontWeight = FontWeight.SemiBold
+                                )
+                            }
+                        }
+                    } else {
+                        Spacer(modifier = Modifier.width(1.dp))
+                    }
+
+                    if (isRisky) {
+                        Surface(
+                            color = palette.choiceForceColor.copy(alpha = 0.16f),
+                            contentColor = palette.choiceForceColor,
+                            shape = RoundedCornerShape(999.dp),
+                            modifier = Modifier.testTag("risky_choice_badge_${choice.id}")
+                        ) {
+                            Row(
+                                verticalAlignment = Alignment.CenterVertically,
+                                horizontalArrangement = Arrangement.spacedBy(4.dp),
+                                modifier = Modifier.padding(horizontal = 8.dp, vertical = 3.dp)
+                            ) {
+                                Icon(
+                                    imageVector = Icons.Outlined.Casino,
+                                    contentDescription = "Рискованный выбор с развилками",
+                                    modifier = Modifier.size(12.dp)
+                                )
+                                Text(
+                                    text = "Риск • развилки",
+                                    style = MaterialTheme.typography.labelSmall,
+                                    fontWeight = FontWeight.SemiBold
+                                )
+                            }
                         }
                     }
                 }

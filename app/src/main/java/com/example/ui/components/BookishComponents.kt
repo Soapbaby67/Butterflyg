@@ -25,6 +25,8 @@ import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.automirrored.outlined.VolumeOff
+import androidx.compose.material.icons.automirrored.outlined.VolumeUp
 import androidx.compose.material.icons.outlined.AutoAwesome
 import androidx.compose.material.icons.outlined.Backpack
 import androidx.compose.material.icons.outlined.Bolt
@@ -673,6 +675,38 @@ fun PaperThemeToggleButton(
         Icon(
             imageVector = icon,
             contentDescription = "Тема: ${themeMode.labelRu}"
+        )
+    }
+}
+
+@Composable
+fun SoundToggleButton(
+    soundEnabled: Boolean,
+    onToggleSound: () -> Unit,
+    modifier: Modifier = Modifier
+) {
+    IconButton(
+        onClick = onToggleSound,
+        modifier = modifier
+            .minimumInteractiveComponentSize()
+            .testTag("sound_toggle_button")
+    ) {
+        Icon(
+            imageVector = if (soundEnabled) {
+                Icons.AutoMirrored.Outlined.VolumeUp
+            } else {
+                Icons.AutoMirrored.Outlined.VolumeOff
+            },
+            contentDescription = if (soundEnabled) {
+                "Выключить звук и музыку"
+            } else {
+                "Включить звук и музыку"
+            },
+            tint = if (soundEnabled) {
+                MaterialTheme.colorScheme.primary
+            } else {
+                MaterialTheme.colorScheme.onSurfaceVariant
+            }
         )
     }
 }

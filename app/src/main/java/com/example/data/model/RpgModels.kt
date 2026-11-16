@@ -3,6 +3,7 @@ package com.example.data.model
 import com.google.firebase.Timestamp
 import com.google.firebase.firestore.DocumentId
 import com.google.firebase.firestore.IgnoreExtraProperties
+import com.google.firebase.firestore.PropertyName
 import com.google.firebase.firestore.ServerTimestamp
 
 enum class EmotionCategory(val key: String, val russianDefault: String) {
@@ -85,17 +86,56 @@ data class ButterflyEvent(
     )
 }
 
+enum class RiskOutcomeTier(val key: String, val labelRu: String) {
+    TRIUMPH("triumph", "Триумф"),
+    MIXED("mixed", "С ценой"),
+    SETBACK("setback", "Срыв"),
+    TWIST("twist", "Поворот судьбы");
+
+    companion object {
+        fun fromKey(key: String?): RiskOutcomeTier {
+            val normalized = key?.trim()?.lowercase() ?: return MIXED
+            return entries.firstOrNull { it.key == normalized } ?: MIXED
+        }
+    }
+}
+
+@IgnoreExtraProperties
+data class RiskOutcome(
+    val id: String = "",
+    val label: String = "",
+    val description: String = "",
+    val tier: String = "mixed",
+    val weight: Long = 25L
+) {
+    fun toFirestoreMap(): Map<String, Any> = mapOf(
+        "id" to id.take(24),
+        "label" to label.take(80),
+        "description" to description.take(240),
+        "tier" to RiskOutcomeTier.fromKey(tier).key,
+        "weight" to weight.coerceIn(5L, 80L)
+    )
+}
+
 @IgnoreExtraProperties
 data class TurnChoice(
     val id: String = "",
     val approach: String = "",
-    val text: String = ""
+    val text: String = "",
+    @get:PropertyName("isRisky")
+    @field:PropertyName("isRisky")
+    val isRisky: Boolean = false,
+    val riskOutcomes: List<RiskOutcome> = emptyList()
 ) {
-    fun toFirestoreMap(): Map<String, Any> = mapOf(
-        "id" to id.take(24),
-        "approach" to approach.take(60),
-        "text" to text.take(400)
-    )
+    fun toFirestoreMap(): Map<String, Any> = buildMap {
+        put("id", id.take(24))
+        put("approach", approach.take(60))
+        put("text", text.take(400))
+        put("isRisky", isRisky)
+        if (riskOutcomes.isNotEmpty()) {
+            put("riskOutcomes", riskOutcomes.take(4).map { it.toFirestoreMap() })
+        }
+    }
 }
 
 @IgnoreExtraProperties
@@ -117,6 +157,7 @@ data class Campaign(
     val inventory: List<String> = emptyList(),
     val npcs: List<NpcRelation> = emptyList(),
     val butterflyEvents: List<ButterflyEvent> = emptyList(),
+    val activeQuests: List<String> = emptyList(),
     val storySummary: String = "",
     @ServerTimestamp val createdAt: Timestamp? = null,
     @ServerTimestamp val updatedAt: Timestamp? = null

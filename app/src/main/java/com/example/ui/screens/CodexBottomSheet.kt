@@ -23,8 +23,11 @@ import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Add
 import androidx.compose.material.icons.filled.PushPin
+import androidx.compose.material.icons.outlined.CheckCircle
 import androidx.compose.material.icons.outlined.DeleteOutline
+import androidx.compose.material.icons.outlined.Flag
 import androidx.compose.material.icons.outlined.PushPin
+import androidx.compose.material.icons.outlined.Share
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.FilledIconButton
 import androidx.compose.material3.HorizontalDivider
@@ -34,6 +37,7 @@ import androidx.compose.material3.IconButtonDefaults
 import androidx.compose.material3.LinearProgressIndicator
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.ModalBottomSheet
+import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.PrimaryTabRow
 import androidx.compose.material3.Surface
@@ -50,13 +54,18 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.ImeAction
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
+import com.example.core.ChronicleExporter
+import com.example.core.LocalRpgAudioEngine
+import com.example.core.SfxEvent
 import com.example.data.model.ButterflyEvent
 import com.example.data.model.Campaign
+import com.example.data.model.CampaignTurn
 import com.example.data.model.NpcRelation
 import com.example.data.repository.PlayerFactNote
 import com.example.ui.components.EmotionBadgeChip
@@ -69,6 +78,7 @@ import com.example.ui.theme.rememberUniverseVisualPalette
 @Composable
 fun CodexBottomSheet(
     campaign: Campaign,
+    turns: List<CampaignTurn> = emptyList(),
     facts: List<PlayerFactNote> = emptyList(),
     initialTabIndex: Int = 0,
     onAddFact: (String) -> Unit = {},
@@ -90,6 +100,7 @@ fun CodexBottomSheet(
     ) {
         CodexContent(
             campaign = campaign,
+            turns = turns,
             facts = facts,
             selectedTab = selectedTab,
             onTabSelect = { selectedTab = it },
@@ -108,6 +119,7 @@ fun CodexBottomSheet(
 @Composable
 fun CodexContent(
     campaign: Campaign,
+    turns: List<CampaignTurn> = emptyList(),
     facts: List<PlayerFactNote> = emptyList(),
     selectedTab: Int = 0,
     onTabSelect: (Int) -> Unit = {},
@@ -166,6 +178,7 @@ fun CodexContent(
             when (clampedTab) {
                 0 -> CharacterAndInventoryTab(
                     campaign = campaign,
+                    turns = turns,
                     palette = universePalette,
                     onItemClick = onItemClick
                 )
@@ -191,14 +204,72 @@ fun CodexContent(
 @Composable
 private fun CharacterAndInventoryTab(
     campaign: Campaign,
+    turns: List<CampaignTurn>,
     palette: UniverseVisualPalette,
     onItemClick: (String) -> Unit
 ) {
+    val context = LocalContext.current
+    val audio = LocalRpgAudioEngine.current
     LazyColumn(
         contentPadding = PaddingValues(20.dp),
         verticalArrangement = Arrangement.spacedBy(14.dp),
         modifier = Modifier.fillMaxWidth()
     ) {
+        if (campaign.activeQuests.isNotEmpty()) {
+            item {
+                Surface(
+                    color = palette.accentPrimary.copy(alpha = 0.10f),
+                    shape = MaterialTheme.shapes.medium,
+                    border = BorderStroke(1.dp, palette.accentPrimary.copy(alpha = 0.32f)),
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .testTag("codex_active_quests_card")
+                ) {
+                    Column(
+                        modifier = Modifier.padding(12.dp),
+                        verticalArrangement = Arrangement.spacedBy(6.dp)
+                    ) {
+                        Row(
+                            verticalAlignment = Alignment.CenterVertically,
+                            horizontalArrangement = Arrangement.spacedBy(6.dp)
+                        ) {
+                            Icon(
+                                imageVector = Icons.Outlined.Flag,
+                                contentDescription = null,
+                                tint = palette.accentPrimary,
+                                modifier = Modifier.size(16.dp)
+                            )
+                            Text(
+                                text = "Активные цели и нити сюжета",
+                                style = MaterialTheme.typography.titleSmall,
+                                fontWeight = FontWeight.SemiBold,
+                                color = MaterialTheme.colorScheme.onSurface
+                            )
+                        }
+                        campaign.activeQuests.forEach { quest ->
+                            Row(
+                                verticalAlignment = Alignment.Top,
+                                horizontalArrangement = Arrangement.spacedBy(6.dp)
+                            ) {
+                                Icon(
+                                    imageVector = Icons.Outlined.CheckCircle,
+                                    contentDescription = null,
+                                    tint = palette.accentSecondary,
+                                    modifier = Modifier
+                                        .padding(top = 2.dp)
+                                        .size(14.dp)
+                                )
+                                Text(
+                                    text = quest,
+                                    style = MaterialTheme.typography.bodySmall,
+                                    color = MaterialTheme.colorScheme.onSurface
+                                )
+                            }
+                        }
+                    }
+                }
+            }
+        }
         item {
             CodexInfoBlock(title = "Персонаж", body = campaign.characterSummary)
         }
@@ -207,6 +278,26 @@ private fun CharacterAndInventoryTab(
         }
         item {
             CodexInfoBlock(title = "Тон и правила", body = campaign.toneAndDifficulty)
+        }
+        item {
+            OutlinedButton(
+                onClick = {
+                    audio?.playSfx(SfxEvent.UI_TAP)
+                    ChronicleExporter.shareChronicle(context, campaign, turns)
+                },
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .minimumInteractiveComponentSize()
+                    .testTag("share_chronicle_button")
+            ) {
+                Icon(
+                    imageVector = Icons.Outlined.Share,
+                    contentDescription = null,
+                    modifier = Modifier.size(18.dp)
+                )
+                Spacer(modifier = Modifier.size(8.dp))
+                Text("Поделиться хроникой как книгой")
+            }
         }
         item {
             Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {

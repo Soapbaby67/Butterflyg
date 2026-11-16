@@ -51,6 +51,8 @@ import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.example.R
+import com.example.core.LocalRpgAudioEngine
+import com.example.core.SfxEvent
 import com.example.data.model.UniversePresets
 import com.example.ui.theme.ChroniclesDynamicBackdrop
 import com.example.ui.viewmodel.CharacterArchetype
@@ -74,6 +76,7 @@ fun SetupWizardScreen(
     onCampaignCreated: (campaignId: String) -> Unit
 ) {
     val state by viewModel.uiState.collectAsStateWithLifecycle()
+    val audio = LocalRpgAudioEngine.current
 
     LaunchedEffect(initialTemplateId) {
         viewModel.applyTemplateById(initialTemplateId)
@@ -132,7 +135,10 @@ fun SetupWizardScreen(
                     contentAlignment = Alignment.Center
                 ) {
                     Button(
-                        onClick = { viewModel.startChronicle() },
+                        onClick = {
+                            audio?.playSfx(SfxEvent.SEND_ACTION)
+                            viewModel.startChronicle()
+                        },
                         enabled = !state.isGenerating,
                         modifier = Modifier
                             .fillMaxWidth()
@@ -189,7 +195,10 @@ fun SetupWizardScreen(
                     items(UniversePresets.templates, key = { it.id }) { template ->
                         FilterChip(
                             selected = state.selectedTemplateId == template.id,
-                            onClick = { viewModel.applyTemplate(template) },
+                            onClick = {
+                                audio?.playSfx(SfxEvent.UI_TAP)
+                                viewModel.applyTemplate(template)
+                            },
                             label = { Text(template.title) }
                         )
                     }

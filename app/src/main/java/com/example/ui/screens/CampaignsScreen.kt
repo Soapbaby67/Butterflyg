@@ -66,6 +66,8 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.example.R
+import com.example.core.LocalRpgAudioEngine
+import com.example.core.SfxEvent
 import com.example.core.rememberRpgHaptics
 import com.example.data.model.Campaign
 import com.example.data.model.ScenarioGenre
@@ -76,6 +78,7 @@ import com.example.ui.components.EmotionBadgeChip
 import com.example.ui.components.HudStatsParser
 import com.example.ui.components.NpcPortraitAvatar
 import com.example.ui.components.PaperThemeToggleButton
+import com.example.ui.components.SoundToggleButton
 import com.example.ui.theme.ChroniclesDynamicBackdrop
 import com.example.ui.theme.WeatherMood
 import com.example.ui.theme.rememberUniverseVisualPalette
@@ -90,6 +93,8 @@ fun CampaignsScreen(
     userDisplayName: String,
     themeMode: PaperThemeMode,
     hapticsEnabled: Boolean,
+    soundEnabled: Boolean = true,
+    onToggleSound: () -> Unit = {},
     onCycleTheme: () -> Unit,
     onOpenSettings: () -> Unit,
     onOpenPresentation: () -> Unit,
@@ -102,6 +107,7 @@ fun CampaignsScreen(
     var campaignToDelete by remember { mutableStateOf<Campaign?>(null) }
     var selectedGenre by remember { mutableStateOf(ScenarioGenre.ALL) }
     val haptics = rememberRpgHaptics(hapticsEnabled)
+    val audio = LocalRpgAudioEngine.current
 
     val filteredTemplates = remember(selectedGenre) {
         if (selectedGenre == ScenarioGenre.ALL) {
@@ -138,16 +144,26 @@ fun CampaignsScreen(
                     }
                 },
                 actions = {
+                    SoundToggleButton(
+                        soundEnabled = soundEnabled,
+                        onToggleSound = {
+                            haptics.tap()
+                            audio?.playSfx(SfxEvent.UI_TAP)
+                            onToggleSound()
+                        }
+                    )
                     PaperThemeToggleButton(
                         themeMode = themeMode,
                         onCycleTheme = {
                             haptics.tap()
+                            audio?.playSfx(SfxEvent.UI_TAP)
                             onCycleTheme()
                         }
                     )
                     IconButton(
                         onClick = {
                             haptics.tap()
+                            audio?.playSfx(SfxEvent.UI_TAP)
                             onOpenPresentation()
                         },
                         modifier = Modifier
@@ -162,6 +178,7 @@ fun CampaignsScreen(
                     IconButton(
                         onClick = {
                             haptics.tap()
+                            audio?.playSfx(SfxEvent.UI_TAP)
                             onOpenSettings()
                         },
                         modifier = Modifier
