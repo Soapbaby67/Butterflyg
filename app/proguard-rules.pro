@@ -20,5 +20,6 @@
     java.lang.Object writeReplace();
     java.lang.Object readResolve();
 }
+-keep class com.google.firebase.appcheck.** { *; }
 -dontwarn com.google.errorprone.annotations.**
 -dontwarn javax.annotation.**
