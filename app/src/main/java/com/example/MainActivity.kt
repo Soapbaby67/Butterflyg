@@ -139,7 +139,8 @@ class MainActivity : ComponentActivity() {
                     themeMode = appSettings.themeMode,
                     dynamicContext = dynamicContext,
                     fontStyle = appSettings.fontStyle,
-                    fontScale = appSettings.fontScale
+                    fontScale = appSettings.fontScale,
+                    applyFontToWholeUi = appSettings.applyFontToWholeUi
                 ) {
                     AppNavigation(
                         appSettings = appSettings,
@@ -400,6 +401,10 @@ private fun AuthenticatedNavHost(
                 hapticsEnabled = appSettings.hapticsEnabled,
                 soundEnabled = appSettings.soundEnabled,
                 autoReadTtsEnabled = appSettings.autoReadTtsEnabled,
+                focusReadingMode = appSettings.focusReadingMode,
+                onToggleFocusReadingMode = { enabled ->
+                    coroutineScope.launch { themeRepo.setFocusReadingMode(enabled) }
+                },
                 onToggleSound = onToggleSound,
                 onDynamicContextChange = onDynamicContextChange,
                 onOpenSettings = { showSettingsSheet = true },
@@ -429,6 +434,9 @@ private fun AuthenticatedNavHost(
             },
             onSelectFontScale = { scale ->
                 coroutineScope.launch { themeRepo.setFontScale(scale) }
+            },
+            onToggleApplyFontToWholeUi = { enabled ->
+                coroutineScope.launch { themeRepo.setApplyFontToWholeUi(enabled) }
             },
             onSelectAiModel = { model ->
                 coroutineScope.launch { themeRepo.setAiModel(model) }

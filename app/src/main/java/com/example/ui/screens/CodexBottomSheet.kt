@@ -49,7 +49,7 @@ import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.ModalBottomSheet
 import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.OutlinedTextField
-import androidx.compose.material3.PrimaryTabRow
+import androidx.compose.material3.PrimaryScrollableTabRow
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Tab
 import androidx.compose.material3.Text
@@ -74,6 +74,7 @@ import androidx.compose.ui.unit.dp
 import com.example.core.ChronicleExporter
 import com.example.core.LocalRpgAudioEngine
 import com.example.core.SfxEvent
+import com.example.data.model.AchievementStatus
 import com.example.data.model.ButterflyEvent
 import com.example.data.model.Campaign
 import com.example.data.model.CampaignTurn
@@ -81,6 +82,8 @@ import com.example.data.model.InventoryItem
 import com.example.data.model.NpcRelation
 import com.example.data.model.QuestStatus
 import com.example.data.repository.PlayerFactNote
+import com.example.ui.components.ButterflyBranchMapCard
+import com.example.ui.components.ChronicleAchievementsTab
 import com.example.ui.components.EmotionBadgeChip
 import com.example.ui.components.ItemPictureTile
 import com.example.ui.components.NpcPortraitAvatar
@@ -93,16 +96,19 @@ fun CodexBottomSheet(
     campaign: Campaign,
     turns: List<CampaignTurn> = emptyList(),
     facts: List<PlayerFactNote> = emptyList(),
+    achievementStatuses: List<AchievementStatus> = emptyList(),
+    isBusy: Boolean = false,
     initialTabIndex: Int = 0,
     onAddFact: (String) -> Unit = {},
     onToggleFactPinned: (String) -> Unit = {},
     onDeleteFact: (String) -> Unit = {},
     onItemClick: (InventoryItem) -> Unit = {},
+    onForkAtTurn: ((Long) -> Unit)? = null,
     onDismiss: () -> Unit
 ) {
     val sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true)
     var selectedTab by remember(initialTabIndex) {
-        mutableIntStateOf(initialTabIndex.coerceIn(0, 3))
+        mutableIntStateOf(initialTabIndex.coerceIn(0, 4))
     }
 
     ModalBottomSheet(
@@ -115,12 +121,15 @@ fun CodexBottomSheet(
             campaign = campaign,
             turns = turns,
             facts = facts,
+            achievementStatuses = achievementStatuses,
+            isBusy = isBusy,
             selectedTab = selectedTab,
             onTabSelect = { selectedTab = it },
             onAddFact = onAddFact,
             onToggleFactPinned = onToggleFactPinned,
             onDeleteFact = onDeleteFact,
             onItemClick = onItemClick,
+            onForkAtTurn = onForkAtTurn,
             modifier = Modifier
                 .fillMaxWidth()
                 .navigationBarsPadding()
@@ -134,22 +143,27 @@ fun CodexContent(
     campaign: Campaign,
     turns: List<CampaignTurn> = emptyList(),
     facts: List<PlayerFactNote> = emptyList(),
+    achievementStatuses: List<AchievementStatus> = emptyList(),
+    isBusy: Boolean = false,
     selectedTab: Int = 0,
     onTabSelect: (Int) -> Unit = {},
     onAddFact: (String) -> Unit = {},
     onToggleFactPinned: (String) -> Unit = {},
     onDeleteFact: (String) -> Unit = {},
     onItemClick: (InventoryItem) -> Unit = {},
+    onForkAtTurn: ((Long) -> Unit)? = null,
     modifier: Modifier = Modifier
 ) {
+    val unlockedCount = achievementStatuses.count { it.isUnlocked }
     val tabs = listOf(
         "Герой",
         "NPC (${campaign.npcs.size})",
         "Бабочка",
+        "Вехи ($unlockedCount)",
         "Факты (${facts.size})"
     )
     val universePalette = rememberUniverseVisualPalette(campaign.universe)
-    val clampedTab = selectedTab.coerceIn(0, 3)
+    val clampedTab = selectedTab.coerceIn(0, 4)
 
     Column(modifier = modifier.fillMaxWidth()) {
         Text(
@@ -167,8 +181,9 @@ fun CodexContent(
 
         Spacer(modifier = Modifier.height(10.dp))
 
-        PrimaryTabRow(
+        PrimaryScrollableTabRow(
             selectedTabIndex = clampedTab,
+            edgePadding = 12.dp,
             containerColor = MaterialTheme.colorScheme.surface.copy(alpha = 0.85f)
         ) {
             tabs.forEachIndexed { index, title ->
@@ -200,8 +215,17 @@ fun CodexContent(
                     universe = campaign.universe,
                     palette = universePalette
                 )
-                2 -> ButterflyTimelineTab(campaign)
-                3 -> PlayerFactsTab(
+                2 -> ButterflyTimelineTab(
+                    campaign = campaign,
+                    palette = universePalette,
+                    isBusy = isBusy,
+                    onForkAtTurn = onForkAtTurn
+                )
+                3 -> ChronicleAchievementsTab(
+                    statuses = achievementStatuses,
+                    palette = universePalette
+                )
+                4 -> PlayerFactsTab(
                     facts = facts,
                     palette = universePalette,
                     onAddFact = onAddFact,
@@ -911,117 +935,23 @@ private fun NpcRelationsTab(
 }
 
 @Composable
-private fun ButterflyTimelineTab(campaign: Campaign) {
+private fun ButterflyTimelineTab(
+    campaign: Campaign,
+    palette: UniverseVisualPalette,
+    isBusy: Boolean,
+    onForkAtTurn: ((Long) -> Unit)?
+) {
     LazyColumn(
         contentPadding = PaddingValues(20.dp),
         verticalArrangement = Arrangement.spacedBy(12.dp),
         modifier = Modifier.fillMaxWidth()
     ) {
         item {
-            Surface(
-                color = MaterialTheme.colorScheme.secondaryContainer.copy(alpha = 0.65f),
-                shape = MaterialTheme.shapes.medium,
-                modifier = Modifier.fillMaxWidth()
-            ) {
-                Column(
-                    modifier = Modifier.padding(14.dp),
-                    verticalArrangement = Arrangement.spacedBy(6.dp)
-                ) {
-                    Text(
-                        text = "Отклонение от канона: ${campaign.canonDeviationPercent}%",
-                        style = MaterialTheme.typography.titleMedium,
-                        color = MaterialTheme.colorScheme.onSecondaryContainer
-                    )
-                    LinearProgressIndicator(
-                        progress = { campaign.canonDeviationPercent.coerceIn(0L, 100L) / 100f },
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .height(7.dp)
-                            .clip(RoundedCornerShape(999.dp)),
-                        color = MaterialTheme.colorScheme.secondary,
-                        trackColor = MaterialTheme.colorScheme.outlineVariant
-                    )
-                    if (campaign.storySummary.isNotBlank()) {
-                        HorizontalDivider(
-                            color = MaterialTheme.colorScheme.outlineVariant,
-                            modifier = Modifier.padding(vertical = 4.dp)
-                        )
-                        Text(
-                            text = campaign.storySummary,
-                            style = MaterialTheme.typography.bodySmall,
-                            color = MaterialTheme.colorScheme.onSecondaryContainer
-                        )
-                    }
-                }
-            }
-        }
-
-        if (campaign.butterflyEvents.isEmpty()) {
-            item {
-                Text(
-                    text = "Пока события движутся близко к канону. Ваши смелые решения появятся здесь.",
-                    style = MaterialTheme.typography.bodyMedium,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant,
-                    modifier = Modifier.padding(vertical = 8.dp)
-                )
-            }
-        } else {
-            items(campaign.butterflyEvents.reversed()) { event ->
-                ButterflyEventRow(event)
-            }
-        }
-    }
-}
-
-@Composable
-private fun ButterflyEventRow(event: ButterflyEvent) {
-    val impactLabel = when (event.impactLevel.lowercase()) {
-        "critical" -> "Критично"
-        "major" -> "Значимо"
-        else -> "Сдвиг"
-    }
-    val impactColor = when (event.impactLevel.lowercase()) {
-        "critical" -> MaterialTheme.colorScheme.error
-        "major" -> MaterialTheme.colorScheme.primary
-        else -> MaterialTheme.colorScheme.secondary
-    }
-
-    Surface(
-        color = MaterialTheme.colorScheme.background,
-        shape = MaterialTheme.shapes.medium,
-        border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant),
-        modifier = Modifier.fillMaxWidth()
-    ) {
-        Column(
-            modifier = Modifier.padding(14.dp),
-            verticalArrangement = Arrangement.spacedBy(5.dp)
-        ) {
-            Row(
-                modifier = Modifier.fillMaxWidth(),
-                horizontalArrangement = Arrangement.SpaceBetween,
-                verticalAlignment = Alignment.CenterVertically
-            ) {
-                Text(
-                    text = "Ход ${event.turnNumber}",
-                    style = MaterialTheme.typography.labelMedium,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant
-                )
-                Text(
-                    text = impactLabel,
-                    style = MaterialTheme.typography.labelMedium,
-                    fontWeight = FontWeight.SemiBold,
-                    color = impactColor
-                )
-            }
-            Text(
-                text = event.title,
-                style = MaterialTheme.typography.titleMedium,
-                color = MaterialTheme.colorScheme.onSurface
-            )
-            Text(
-                text = event.consequence,
-                style = MaterialTheme.typography.bodySmall,
-                color = MaterialTheme.colorScheme.onSurfaceVariant
+            ButterflyBranchMapCard(
+                campaign = campaign,
+                palette = palette,
+                isBusy = isBusy,
+                onForkAtTurn = onForkAtTurn
             )
         }
     }

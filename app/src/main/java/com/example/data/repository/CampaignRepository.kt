@@ -14,8 +14,12 @@ import com.example.data.model.NpcRelation
 import com.example.data.model.QuestEntry
 import com.example.data.model.QuestStatus
 import com.example.data.model.SessionSetupInput
+import com.example.data.model.SkillProgressionEngine
+import com.example.data.model.SkillProgressionResult
+import com.example.data.model.SkillXpState
 import com.example.data.model.TurnChoice
 import com.example.data.model.TurnStateSnapshot
+import com.example.data.model.UnlockedAchievementRecord
 import com.google.firebase.Firebase
 import com.google.firebase.Timestamp
 import com.google.firebase.auth.FirebaseAuth
@@ -206,6 +210,22 @@ class CampaignRepository(
         emitAll(mergedFlow)
     }
 
+    fun observeExtendedState(campaignId: String): Flow<CampaignExtendedState> {
+        val store = extendedStore ?: return flow { emit(CampaignExtendedState()) }
+        return store.revision.map { store.read(campaignId) ?: CampaignExtendedState() }
+    }
+
+    fun toggleChapterBookmark(campaignId: String, turnNumber: Long, excerpt: String): Boolean {
+        return extendedStore?.toggleBookmark(campaignId, turnNumber, excerpt) ?: false
+    }
+
+    fun saveUnlockedAchievements(campaignId: String, records: List<UnlockedAchievementRecord>) {
+        extendedStore?.saveCampaignState(
+            campaignId = campaignId,
+            unlockedAchievements = records
+        )
+    }
+
     suspend fun getCampaign(campaignId: String): Campaign? {
         val uid = requireUserId()
         val docRef = campaignsCollection(uid).document(campaignId)
@@ -365,8 +385,9 @@ class CampaignRepository(
     suspend fun recordTurn(
         campaign: Campaign,
         playerAction: String,
-        outcome: GmTurnOutcome
-    ) {
+        outcome: GmTurnOutcome,
+        choiceApproach: String = ""
+    ): SkillProgressionResult {
         val uid = requireUserId()
         require(campaign.id.isNotBlank()) { "Campaign ID must not be blank" }
         val nextTurnNumber = campaign.turnCount + 1L
@@ -410,7 +431,18 @@ class CampaignRepository(
             .map { it.title.take(180) }
             .take(12)
 
-        val updatedSkills = outcome.skills.coerced()
+        val existingExtended = extendedStore?.read(campaign.id) ?: CampaignExtendedState()
+        val baseSkills = campaign.skills.coerced()
+        val progression = SkillProgressionEngine.evaluateTurnProgression(
+            currentSkills = baseSkills,
+            currentXp = existingExtended.skillXp,
+            playerAction = playerAction,
+            turnNumber = nextTurnNumber,
+            choiceApproach = choiceApproach
+        )
+        val updatedSkills = progression.updatedSkills.coerced()
+        val nextLevelUpCount = existingExtended.skillLevelUpCount +
+            if (progression.levelUp != null) 1 else 0
 
         val snapshot = TurnStateSnapshot(
             hudLocation = outcome.hudLocation,
@@ -496,11 +528,14 @@ class CampaignRepository(
                 currencyAmount = outcome.currencyAmount.coerceIn(0L, 100_000_000L),
                 currencyLabel = outcome.currencyLabel.take(80),
                 skills = updatedSkills,
+                skillXp = progression.updatedXp,
+                skillLevelUpCount = nextLevelUpCount,
                 inventoryItems = structuredItems,
                 quests = mergedQuests,
                 chapterSummaries = updatedChapters,
                 turnSnapshot = nextTurnNumber to snapshot
             )
+            return progression
         } catch (e: CancellationException) {
             throw e
         } catch (e: Exception) {
@@ -719,6 +754,11 @@ class CampaignRepository(
                 }
             }
 
+            val sourceExt = extendedStore?.read(sourceCampaignId)
+            extendedStore?.saveCampaignState(
+                campaignId = sourceCampaignId,
+                hasForkedChronicle = true
+            )
             extendedStore?.saveCampaignState(
                 campaignId = newCampaignId,
                 playerName = sourceCampaign.playerName.take(80),
@@ -727,9 +767,13 @@ class CampaignRepository(
                 currencyAmount = (snap?.currencyAmount ?: sourceCampaign.currencyAmount).coerceIn(0L, 100_000_000L),
                 currencyLabel = (snap?.currencyLabel ?: sourceCampaign.currencyLabel).take(80),
                 skills = snap?.skills ?: sourceCampaign.skills,
+                skillXp = sourceExt?.skillXp ?: SkillXpState(),
+                skillLevelUpCount = sourceExt?.skillLevelUpCount ?: 0,
                 inventoryItems = restoredInventoryItems.take(60),
                 quests = restoredQuests.take(30),
-                chapterSummaries = (snap?.chapterSummaries ?: sourceCampaign.chapterSummaries).take(40)
+                chapterSummaries = (snap?.chapterSummaries ?: sourceCampaign.chapterSummaries).take(40),
+                bookmarks = sourceExt?.bookmarks?.filter { it.turnNumber <= targetTurn.turnNumber }.orEmpty(),
+                hasForkedChronicle = true
             )
             val clonedSnapshots = turnsToCopy.mapNotNull { t -> t.stateSnapshot?.let { t.turnNumber to it } }.toMap()
             if (clonedSnapshots.isNotEmpty()) {

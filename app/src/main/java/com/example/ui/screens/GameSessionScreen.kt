@@ -58,6 +58,12 @@ import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
+import androidx.compose.foundation.clickable
+import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.size
+import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.outlined.AutoAwesome
+import androidx.compose.material3.Icon
 import com.example.core.LocalRpgAudioEngine
 import com.example.core.SceneNarratorTts
 import com.example.core.SfxEvent
@@ -66,14 +72,17 @@ import com.example.data.model.EmotionCategory
 import com.example.data.model.InventoryItem
 import com.example.data.model.RiskyChoiceResolver
 import com.example.data.model.TurnChoice
+import com.example.ui.components.AchievementUnlockedBanner
 import com.example.ui.components.HudStatsParser
 import com.example.ui.components.ItemActionSheet
 import com.example.ui.components.NpcEmotionCard
 import com.example.ui.components.RiskyOutcomeRouletteSheet
+import com.example.ui.components.SkillLevelUpBanner
 import com.example.ui.components.StatsAndInventoryContent
 import com.example.ui.components.WeatherCanvasOverlay
 import com.example.ui.screens.session.ActionComposerDock
 import com.example.ui.screens.session.ActiveNarrativeWindow
+import com.example.ui.screens.session.ChapterNavigatorSheet
 import com.example.ui.screens.session.ChoiceActionCard
 import com.example.ui.screens.session.GeneratingNarrativeWindow
 import com.example.ui.screens.session.PastChaptersSection
@@ -99,6 +108,8 @@ fun GameSessionScreen(
     hapticsEnabled: Boolean,
     soundEnabled: Boolean = true,
     autoReadTtsEnabled: Boolean = false,
+    focusReadingMode: Boolean = false,
+    onToggleFocusReadingMode: (Boolean) -> Unit = {},
     onToggleSound: () -> Unit = {},
     onDynamicContextChange: (DynamicThemeContext) -> Unit = {},
     onOpenSettings: () -> Unit,
@@ -108,6 +119,10 @@ fun GameSessionScreen(
     val sessionState by viewModel.sessionState.collectAsStateWithLifecycle()
     val submissionState by viewModel.submissionState.collectAsStateWithLifecycle()
     val facts by viewModel.facts.collectAsStateWithLifecycle()
+    val extendedState by viewModel.extendedState.collectAsStateWithLifecycle()
+    val achievementStatuses by viewModel.achievementStatuses.collectAsStateWithLifecycle()
+    val recentSkillLevelUp by viewModel.recentSkillLevelUp.collectAsStateWithLifecycle()
+    val recentAchievementBanner by viewModel.recentAchievementBanner.collectAsStateWithLifecycle()
     val draftAction by viewModel.draftAction.collectAsStateWithLifecycle()
     val isMutatingHistory by viewModel.isMutatingHistory.collectAsStateWithLifecycle()
     val itemInspectionState by viewModel.itemInspectionState.collectAsStateWithLifecycle()
@@ -129,11 +144,16 @@ fun GameSessionScreen(
 
     var isCustomActionRisky by rememberSaveable { mutableStateOf(false) }
     var showHistoryTurns by rememberSaveable { mutableStateOf(false) }
+    var showChapterSearchSheet by rememberSaveable { mutableStateOf(false) }
     var codexTab by rememberSaveable { mutableIntStateOf(0) }
     var selectedItemForAction by remember { mutableStateOf<InventoryItem?>(null) }
     var pendingRiskyChoice by remember { mutableStateOf<TurnChoice?>(null) }
     var showRollbackConfirm by remember { mutableStateOf(false) }
     var localVoiceNotice by remember { mutableStateOf<String?>(null) }
+
+    val bookmarkedTurns = remember(extendedState.bookmarks) {
+        extendedState.bookmarks.map { it.turnNumber }.toSet()
+    }
 
     val listState = rememberLazyListState()
     val coroutineScope = rememberCoroutineScope()
@@ -326,16 +346,19 @@ fun GameSessionScreen(
                 SessionTopBar(
                     title = successData?.campaign?.title ?: "Хроника",
                     subtitle = successData?.let {
-                        "Ход ${it.campaign.turnCount} • ${it.campaign.universe}"
+                        if (focusReadingMode) {
+                            "Режим чтения • Глава ${it.campaign.turnCount}"
+                        } else {
+                            "Ход ${it.campaign.turnCount} • ${it.campaign.universe}"
+                        }
                     },
                     currentPage = pagerState.currentPage,
-                    codexTab = codexTab,
                     hasSessionData = successData != null,
-                    pinnedFactsCount = facts.count { it.isPinned },
                     canRollback = canRollback,
                     isBusy = isBusy,
-                    soundEnabled = soundEnabled,
-                    topBarContainerColor = dynamicSpec.topColor.copy(alpha = 0.68f),
+                    focusReadingMode = focusReadingMode,
+                    bookmarksCount = bookmarkedTurns.size,
+                    topBarContainerColor = dynamicSpec.topColor.copy(alpha = if (focusReadingMode) 0.50f else 0.68f),
                     accentPrimary = dynamicSpec.accentPrimary,
                     onBackClick = {
                         if (pagerState.currentPage != 1) {
@@ -345,20 +368,20 @@ fun GameSessionScreen(
                             onBack()
                         }
                     },
+                    onToggleFocusReading = {
+                        haptics.tap()
+                        audio?.playSfx(SfxEvent.UI_TAP)
+                        onToggleFocusReadingMode(!focusReadingMode)
+                    },
+                    onOpenChapterSearch = {
+                        haptics.tap()
+                        audio?.playSfx(SfxEvent.UI_TAP)
+                        showChapterSearchSheet = true
+                    },
                     onRollbackClick = {
                         haptics.tap()
                         audio?.playSfx(SfxEvent.UI_TAP)
                         showRollbackConfirm = true
-                    },
-                    onFactsClick = {
-                        haptics.tap()
-                        codexTab = 3
-                        coroutineScope.launch { pagerState.animateScrollToPage(2) }
-                    },
-                    onToggleSound = {
-                        haptics.tap()
-                        audio?.playSfx(SfxEvent.UI_TAP)
-                        onToggleSound()
                     },
                     onOpenSettings = {
                         haptics.tap()
@@ -368,59 +391,103 @@ fun GameSessionScreen(
                 )
             },
             bottomBar = {
-                AnimatedVisibility(
-                    visible = successData != null && pagerState.currentPage == 1,
-                    enter = expandVertically() + fadeIn(),
-                    exit = shrinkVertically() + fadeOut()
-                ) {
-                    if (successData != null && parsedStats != null) {
-                        ActionComposerDock(
-                            draftAction = draftAction,
-                            isCustomActionRisky = isCustomActionRisky,
-                            isBusy = isBusy,
-                            submissionState = submissionState,
-                            actionNotice = localVoiceNotice ?: actionNotice,
-                            inventoryItems = parsedStats.structuredInventory,
-                            accentPrimary = dynamicSpec.accentPrimary,
-                            universePalette = universePalette,
-                            onDraftChange = viewModel::updateDraftAction,
-                            onToggleRiskMode = { enabled ->
-                                haptics.tap()
-                                audio?.playSfx(SfxEvent.UI_TAP)
-                                isCustomActionRisky = enabled
-                            },
-                            onVoiceInputClick = {
-                                haptics.tap()
-                                audio?.playSfx(SfxEvent.UI_TAP)
-                                narratorTts.stop()
-                                val intent = Intent(RecognizerIntent.ACTION_RECOGNIZE_SPEECH).apply {
-                                    putExtra(
-                                        RecognizerIntent.EXTRA_LANGUAGE_MODEL,
-                                        RecognizerIntent.LANGUAGE_MODEL_FREE_FORM
-                                    )
-                                    putExtra(RecognizerIntent.EXTRA_LANGUAGE, "ru-RU")
-                                    putExtra(RecognizerIntent.EXTRA_PROMPT, "Надиктуйте действие героя…")
+                if (successData != null && pagerState.currentPage == 1 && focusReadingMode) {
+                    // Compact thumb-zone pill in Focus Reading Mode (<15% viewport height)
+                    Box(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .navigationBarsPadding()
+                            .padding(horizontal = 20.dp, vertical = 10.dp),
+                        contentAlignment = Alignment.Center
+                    ) {
+                        Surface(
+                            color = MaterialTheme.colorScheme.surface.copy(alpha = 0.92f),
+                            shape = RoundedCornerShape(999.dp),
+                            border = BorderStroke(1.2.dp, dynamicSpec.accentPrimary.copy(alpha = 0.55f)),
+                            shadowElevation = 6.dp,
+                            modifier = Modifier
+                                .clickable {
+                                    haptics.tap()
+                                    audio?.playSfx(SfxEvent.UI_TAP)
+                                    onToggleFocusReadingMode(false)
                                 }
-                                runCatching { voiceInputLauncher.launch(intent) }
-                                    .onFailure {
-                                        localVoiceNotice = "Голосовой ввод недоступен на этом устройстве."
-                                    }
-                            },
-                            onSubmit = submitDraftAction,
-                            onRetryFailed = { failedAction ->
-                                haptics.tap()
-                                viewModel.submitPlayerAction(failedAction)
-                            },
-                            onDismissNotice = {
-                                localVoiceNotice = null
-                                viewModel.clearActionNotice()
-                            },
-                            onItemClick = { item ->
-                                haptics.tap()
-                                viewModel.clearItemInspection()
-                                selectedItemForAction = item
+                                .testTag("focus_reading_answer_pill")
+                        ) {
+                            Row(
+                                verticalAlignment = Alignment.CenterVertically,
+                                horizontalArrangement = Arrangement.spacedBy(8.dp),
+                                modifier = Modifier.padding(horizontal = 20.dp, vertical = 12.dp)
+                            ) {
+                                Icon(
+                                    imageVector = Icons.Outlined.AutoAwesome,
+                                    contentDescription = null,
+                                    tint = dynamicSpec.accentPrimary,
+                                    modifier = Modifier.size(18.dp)
+                                )
+                                Text(
+                                    text = "Ответить / Выборы",
+                                    style = MaterialTheme.typography.labelLarge,
+                                    fontWeight = FontWeight.SemiBold,
+                                    color = MaterialTheme.colorScheme.onSurface
+                                )
                             }
-                        )
+                        }
+                    }
+                } else {
+                    AnimatedVisibility(
+                        visible = successData != null && pagerState.currentPage == 1,
+                        enter = expandVertically() + fadeIn(),
+                        exit = shrinkVertically() + fadeOut()
+                    ) {
+                        if (successData != null && parsedStats != null) {
+                            ActionComposerDock(
+                                draftAction = draftAction,
+                                isCustomActionRisky = isCustomActionRisky,
+                                isBusy = isBusy,
+                                submissionState = submissionState,
+                                actionNotice = localVoiceNotice ?: actionNotice,
+                                inventoryItems = parsedStats.structuredInventory,
+                                accentPrimary = dynamicSpec.accentPrimary,
+                                universePalette = universePalette,
+                                onDraftChange = viewModel::updateDraftAction,
+                                onToggleRiskMode = { enabled ->
+                                    haptics.tap()
+                                    audio?.playSfx(SfxEvent.UI_TAP)
+                                    isCustomActionRisky = enabled
+                                },
+                                onVoiceInputClick = {
+                                    haptics.tap()
+                                    audio?.playSfx(SfxEvent.UI_TAP)
+                                    narratorTts.stop()
+                                    val intent = Intent(RecognizerIntent.ACTION_RECOGNIZE_SPEECH).apply {
+                                        putExtra(
+                                            RecognizerIntent.EXTRA_LANGUAGE_MODEL,
+                                            RecognizerIntent.LANGUAGE_MODEL_FREE_FORM
+                                        )
+                                        putExtra(RecognizerIntent.EXTRA_LANGUAGE, "ru-RU")
+                                        putExtra(RecognizerIntent.EXTRA_PROMPT, "Надиктуйте действие героя…")
+                                    }
+                                    runCatching { voiceInputLauncher.launch(intent) }
+                                        .onFailure {
+                                            localVoiceNotice = "Голосовой ввод недоступен на этом устройстве."
+                                        }
+                                },
+                                onSubmit = submitDraftAction,
+                                onRetryFailed = { failedAction ->
+                                    haptics.tap()
+                                    viewModel.submitPlayerAction(failedAction)
+                                },
+                                onDismissNotice = {
+                                    localVoiceNotice = null
+                                    viewModel.clearActionNotice()
+                                },
+                                onItemClick = { item ->
+                                    haptics.tap()
+                                    viewModel.clearItemInspection()
+                                    selectedItemForAction = item
+                                }
+                            )
+                        }
                     }
                 }
             }
@@ -481,19 +548,25 @@ fun GameSessionScreen(
                             modifier = Modifier.fillMaxSize(),
                             horizontalAlignment = Alignment.CenterHorizontally
                         ) {
-                            SwipeNavigationStrip(
-                                currentPage = pagerState.currentPage,
-                                accentColor = dynamicSpec.accentPrimary,
-                                secondaryColor = dynamicSpec.accentSecondary,
-                                onSelectPage = { page ->
-                                    haptics.tap()
-                                    coroutineScope.launch { pagerState.animateScrollToPage(page) }
-                                },
-                                modifier = Modifier
-                                    .fillMaxWidth()
-                                    .widthIn(max = 720.dp)
-                                    .padding(horizontal = 14.dp, vertical = 6.dp)
-                            )
+                            AnimatedVisibility(
+                                visible = !focusReadingMode || pagerState.currentPage != 1,
+                                enter = expandVertically() + fadeIn(),
+                                exit = shrinkVertically() + fadeOut()
+                            ) {
+                                SwipeNavigationStrip(
+                                    currentPage = pagerState.currentPage,
+                                    accentColor = dynamicSpec.accentPrimary,
+                                    secondaryColor = dynamicSpec.accentSecondary,
+                                    onSelectPage = { page ->
+                                        haptics.tap()
+                                        coroutineScope.launch { pagerState.animateScrollToPage(page) }
+                                    },
+                                    modifier = Modifier
+                                        .fillMaxWidth()
+                                        .widthIn(max = 720.dp)
+                                        .padding(horizontal = 14.dp, vertical = 6.dp)
+                                )
+                            }
 
                             HorizontalPager(
                                 state = pagerState,
@@ -521,6 +594,7 @@ fun GameSessionScreen(
                                                     campaign = data.campaign,
                                                     stats = stats,
                                                     palette = universePalette,
+                                                    skillXp = extendedState.skillXp,
                                                     onItemClick = { item ->
                                                         haptics.tap()
                                                         viewModel.clearItemInspection()
@@ -550,34 +624,36 @@ fun GameSessionScreen(
                                                     start = 14.dp,
                                                     end = 14.dp,
                                                     top = 4.dp,
-                                                    bottom = 20.dp
+                                                    bottom = 24.dp
                                                 ),
                                                 verticalArrangement = Arrangement.spacedBy(12.dp),
                                                 modifier = Modifier
                                                     .fillMaxSize()
                                                     .widthIn(max = 720.dp)
                                             ) {
-                                                item(key = "scene_location_strip") {
-                                                    SceneStatusBarStrip(
-                                                        location = data.campaign.hudLocation,
-                                                        timeLabel = data.campaign.hudTime,
-                                                        weatherMood = stats.weatherMood,
-                                                        healthPercent = stats.healthPercent,
-                                                        accentColor = dynamicSpec.accentPrimary,
-                                                        secondaryColor = dynamicSpec.accentSecondary,
-                                                        onInspectScene = {
-                                                            if (!isBusy && draftAction.isBlank()) {
+                                                if (!focusReadingMode) {
+                                                    item(key = "scene_location_strip") {
+                                                        SceneStatusBarStrip(
+                                                            location = data.campaign.hudLocation,
+                                                            timeLabel = data.campaign.hudTime,
+                                                            weatherMood = stats.weatherMood,
+                                                            healthPercent = stats.healthPercent,
+                                                            accentColor = dynamicSpec.accentPrimary,
+                                                            secondaryColor = dynamicSpec.accentSecondary,
+                                                            onInspectScene = {
+                                                                if (!isBusy && draftAction.isBlank()) {
+                                                                    haptics.tap()
+                                                                    viewModel.updateDraftAction(
+                                                                        "Осмотреться вокруг (${data.campaign.hudLocation.ifBlank { "в сцене" }}): "
+                                                                    )
+                                                                }
+                                                            },
+                                                            onOpenStats = {
                                                                 haptics.tap()
-                                                                viewModel.updateDraftAction(
-                                                                    "Осмотреться вокруг (${data.campaign.hudLocation.ifBlank { "в сцене" }}): "
-                                                                )
+                                                                coroutineScope.launch { pagerState.animateScrollToPage(0) }
                                                             }
-                                                        },
-                                                        onOpenStats = {
-                                                            haptics.tap()
-                                                            coroutineScope.launch { pagerState.animateScrollToPage(0) }
-                                                        }
-                                                    )
+                                                        )
+                                                    }
                                                 }
 
                                                 if (earlierTurns.isNotEmpty()) {
@@ -585,6 +661,7 @@ fun GameSessionScreen(
                                                         PastChaptersSection(
                                                             earlierTurns = earlierTurns,
                                                             chapterSummaries = data.campaign.chapterSummaries,
+                                                            bookmarkedTurns = bookmarkedTurns,
                                                             expanded = showHistoryTurns,
                                                             isBusy = isBusy,
                                                             accentPrimary = dynamicSpec.accentPrimary,
@@ -592,6 +669,11 @@ fun GameSessionScreen(
                                                             onToggleExpanded = {
                                                                 haptics.tap()
                                                                 showHistoryTurns = !showHistoryTurns
+                                                            },
+                                                            onToggleBookmark = { turn ->
+                                                                haptics.tap()
+                                                                audio?.playSfx(SfxEvent.UI_TAP)
+                                                                viewModel.toggleChapterBookmark(turn)
                                                             },
                                                             onForkAtTurn = { turnNum ->
                                                                 haptics.tap()
@@ -618,9 +700,15 @@ fun GameSessionScreen(
                                                             turn = latestTurn,
                                                             accentColor = dynamicSpec.accentPrimary,
                                                             secondaryColor = dynamicSpec.accentSecondary,
+                                                            isBookmarked = latestTurn.turnNumber in bookmarkedTurns,
                                                             isSpeakingThisTurn = isTtsSpeaking && ttsSpeakingTurnId == turnKey,
                                                             isTtsAvailable = isTtsAvailable,
                                                             isBusy = isBusy,
+                                                            onToggleBookmark = {
+                                                                haptics.tap()
+                                                                audio?.playSfx(SfxEvent.UI_TAP)
+                                                                viewModel.toggleChapterBookmark(latestTurn)
+                                                            },
                                                             onToggleTts = {
                                                                 haptics.tap()
                                                                 narratorTts.toggleSpeak(turnKey, latestTurn.narrative)
@@ -637,6 +725,33 @@ fun GameSessionScreen(
                                                                 narratorTts.stop()
                                                                 viewModel.editLastPlayerAction()
                                                             }
+                                                        )
+                                                    }
+                                                }
+
+                                                val levelUpEvent = recentSkillLevelUp
+                                                if (levelUpEvent != null) {
+                                                    item(key = "skill_level_up_banner") {
+                                                        SkillLevelUpBanner(
+                                                            event = levelUpEvent,
+                                                            accentColor = dynamicSpec.accentPrimary,
+                                                            onDismiss = { viewModel.dismissSkillLevelUp() }
+                                                        )
+                                                    }
+                                                }
+
+                                                val unlockedMilestone = recentAchievementBanner
+                                                if (unlockedMilestone != null) {
+                                                    item(key = "achievement_unlocked_banner") {
+                                                        AchievementUnlockedBanner(
+                                                            achievement = unlockedMilestone,
+                                                            accentColor = dynamicSpec.accentSecondary,
+                                                            onOpenMilestones = {
+                                                                viewModel.dismissAchievementBanner()
+                                                                codexTab = 3
+                                                                coroutineScope.launch { pagerState.animateScrollToPage(2) }
+                                                            },
+                                                            onDismiss = { viewModel.dismissAchievementBanner() }
                                                         )
                                                     }
                                                 }
@@ -660,42 +775,47 @@ fun GameSessionScreen(
                                                     }
                                                 }
 
-                                                item(key = "choices_footer") {
-                                                    Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
-                                                        if (!isBusy && latestTurn != null && latestTurn.choices.isNotEmpty()) {
-                                                            Surface(
-                                                                color = MaterialTheme.colorScheme.surface.copy(alpha = 0.82f),
-                                                                shape = RoundedCornerShape(999.dp),
-                                                                border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant)
-                                                            ) {
-                                                                Text(
-                                                                    text = "Ваш выбор",
-                                                                    style = MaterialTheme.typography.titleSmall,
-                                                                    fontWeight = FontWeight.SemiBold,
-                                                                    color = MaterialTheme.colorScheme.onSurface,
-                                                                    modifier = Modifier.padding(horizontal = 12.dp, vertical = 5.dp)
-                                                                )
-                                                            }
-                                                            latestTurn.choices.forEach { choice ->
-                                                                val isRisky = remember(choice) {
-                                                                    RiskyChoiceResolver.isChoiceRisky(choice)
+                                                if (!focusReadingMode) {
+                                                    item(key = "choices_footer") {
+                                                        Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
+                                                            if (!isBusy && latestTurn != null && latestTurn.choices.isNotEmpty()) {
+                                                                Surface(
+                                                                    color = MaterialTheme.colorScheme.surface.copy(alpha = 0.82f),
+                                                                    shape = RoundedCornerShape(999.dp),
+                                                                    border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant)
+                                                                ) {
+                                                                    Text(
+                                                                        text = "Ваш выбор",
+                                                                        style = MaterialTheme.typography.titleSmall,
+                                                                        fontWeight = FontWeight.SemiBold,
+                                                                        color = MaterialTheme.colorScheme.onSurface,
+                                                                        modifier = Modifier.padding(horizontal = 12.dp, vertical = 5.dp)
+                                                                    )
                                                                 }
-                                                                ChoiceActionCard(
-                                                                    choice = choice,
-                                                                    isRisky = isRisky,
-                                                                    palette = universePalette,
-                                                                    onClick = {
-                                                                        haptics.tap()
-                                                                        narratorTts.stop()
-                                                                        if (isRisky) {
-                                                                            audio?.playSfx(SfxEvent.UI_TAP)
-                                                                            pendingRiskyChoice = choice
-                                                                        } else {
-                                                                            audio?.playSfx(SfxEvent.SEND_ACTION)
-                                                                            viewModel.submitPlayerAction(choice.text)
-                                                                        }
+                                                                latestTurn.choices.forEach { choice ->
+                                                                    val isRisky = remember(choice) {
+                                                                        RiskyChoiceResolver.isChoiceRisky(choice)
                                                                     }
-                                                                )
+                                                                    ChoiceActionCard(
+                                                                        choice = choice,
+                                                                        isRisky = isRisky,
+                                                                        palette = universePalette,
+                                                                        onClick = {
+                                                                            haptics.tap()
+                                                                            narratorTts.stop()
+                                                                            if (isRisky) {
+                                                                                audio?.playSfx(SfxEvent.UI_TAP)
+                                                                                pendingRiskyChoice = choice
+                                                                            } else {
+                                                                                audio?.playSfx(SfxEvent.SEND_ACTION)
+                                                                                viewModel.submitPlayerAction(
+                                                                                    rawAction = choice.text,
+                                                                                    choiceApproach = choice.approach
+                                                                                )
+                                                                            }
+                                                                        }
+                                                                    )
+                                                                }
                                                             }
                                                         }
                                                     }
@@ -723,6 +843,8 @@ fun GameSessionScreen(
                                                     campaign = data.campaign,
                                                     turns = data.turns,
                                                     facts = facts,
+                                                    achievementStatuses = achievementStatuses,
+                                                    isBusy = isBusy,
                                                     selectedTab = codexTab,
                                                     onTabSelect = { codexTab = it },
                                                     onAddFact = { text ->
@@ -745,6 +867,14 @@ fun GameSessionScreen(
                                                         audio?.playSfx(SfxEvent.ITEM_USE)
                                                         viewModel.clearItemInspection()
                                                         selectedItemForAction = item
+                                                    },
+                                                    onForkAtTurn = { turnNum ->
+                                                        haptics.tap()
+                                                        audio?.playSfx(SfxEvent.UI_TAP)
+                                                        narratorTts.stop()
+                                                        viewModel.forkCampaignAtTurn(turnNum) { forkedId ->
+                                                            onOpenForkedCampaign(forkedId)
+                                                        }
                                                     },
                                                     modifier = Modifier
                                                         .fillMaxSize()
@@ -845,8 +975,36 @@ fun GameSessionScreen(
                 }
                 pendingRiskyChoice = null
                 narratorTts.stop()
-                viewModel.submitPlayerAction(prompt)
+                viewModel.submitPlayerAction(
+                    rawAction = prompt,
+                    choiceApproach = activeRiskChoice.approach
+                )
             }
+        )
+    }
+
+    if (showChapterSearchSheet && successData != null) {
+        ChapterNavigatorSheet(
+            turns = successData.turns,
+            bookmarks = extendedState.bookmarks,
+            butterflyEvents = successData.campaign.butterflyEvents,
+            isBusy = isBusy,
+            accentPrimary = dynamicSpec.accentPrimary,
+            accentSecondary = dynamicSpec.accentSecondary,
+            onToggleBookmark = { turn ->
+                haptics.tap()
+                audio?.playSfx(SfxEvent.UI_TAP)
+                viewModel.toggleChapterBookmark(turn)
+            },
+            onForkAtTurn = { turnNum ->
+                haptics.tap()
+                audio?.playSfx(SfxEvent.UI_TAP)
+                narratorTts.stop()
+                viewModel.forkCampaignAtTurn(turnNum) { forkedId ->
+                    onOpenForkedCampaign(forkedId)
+                }
+            },
+            onDismiss = { showChapterSearchSheet = false }
         )
     }
 

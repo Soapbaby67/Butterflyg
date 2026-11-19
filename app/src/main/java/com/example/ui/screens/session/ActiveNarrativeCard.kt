@@ -20,8 +20,10 @@ import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.selection.SelectionContainer
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.Bookmark
 import androidx.compose.material.icons.outlined.AutoAwesome
 import androidx.compose.material.icons.outlined.Bolt
+import androidx.compose.material.icons.outlined.BookmarkBorder
 import androidx.compose.material.icons.outlined.Casino
 import androidx.compose.material.icons.outlined.Edit
 import androidx.compose.material.icons.outlined.Explore
@@ -36,6 +38,7 @@ import androidx.compose.material.icons.outlined.VisibilityOff
 import androidx.compose.material.icons.outlined.Whatshot
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
+import androidx.compose.material3.IconButton
 import androidx.compose.material3.LinearProgressIndicator
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Surface
@@ -69,9 +72,11 @@ internal fun ActiveNarrativeWindow(
     turn: CampaignTurn,
     accentColor: Color,
     secondaryColor: Color,
+    isBookmarked: Boolean = false,
     isSpeakingThisTurn: Boolean,
     isTtsAvailable: Boolean,
     isBusy: Boolean,
+    onToggleBookmark: () -> Unit = {},
     onToggleTts: () -> Unit,
     onRerollScene: () -> Unit,
     onEditLastAction: () -> Unit
@@ -150,6 +155,27 @@ internal fun ActiveNarrativeWindow(
                         color = MaterialTheme.colorScheme.outlineVariant,
                         modifier = Modifier.weight(1f)
                     )
+                    IconButton(
+                        onClick = onToggleBookmark,
+                        modifier = Modifier
+                            .size(34.dp)
+                            .testTag("bookmark_active_turn_button")
+                    ) {
+                        Icon(
+                            imageVector = if (isBookmarked) {
+                                Icons.Filled.Bookmark
+                            } else {
+                                Icons.Outlined.BookmarkBorder
+                            },
+                            contentDescription = if (isBookmarked) {
+                                "Убрать главу из закладок"
+                            } else {
+                                "Добавить главу в закладки"
+                            },
+                            tint = if (isBookmarked) secondaryColor else MaterialTheme.colorScheme.onSurfaceVariant,
+                            modifier = Modifier.size(18.dp)
+                        )
+                    }
                     if (isTtsAvailable) {
                         Surface(
                             color = if (isSpeakingThisTurn) {
@@ -194,12 +220,6 @@ internal fun ActiveNarrativeWindow(
                                 )
                             }
                         }
-                    } else {
-                        Text(
-                            text = "Повествование",
-                            style = MaterialTheme.typography.labelSmall,
-                            color = secondaryColor
-                        )
                     }
                 }
 

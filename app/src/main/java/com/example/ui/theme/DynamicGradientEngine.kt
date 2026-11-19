@@ -98,6 +98,76 @@ fun resolveDynamicGradientSpec(
             isDarkSurface = true
         )
 
+        PaperThemeMode.EMERALD_FOREST -> DynamicGradientSpec(
+            topColor = Color(0xFF0B1914),
+            middleColor = Color(0xFF12271F),
+            bottomColor = Color(0xFF0A1410),
+            glowColor = Color(0xFF39B98A),
+            accentPrimary = Color(0xFF56D6A2),
+            accentSecondary = Color(0xFFD9B462),
+            isDarkSurface = true
+        )
+
+        PaperThemeMode.CRIMSON_VELVET -> DynamicGradientSpec(
+            topColor = Color(0xFF180C12),
+            middleColor = Color(0xFF28121B),
+            bottomColor = Color(0xFF14090E),
+            glowColor = Color(0xFFD84A67),
+            accentPrimary = Color(0xFFEB6B84),
+            accentSecondary = Color(0xFFD4C1B8),
+            isDarkSurface = true
+        )
+
+        PaperThemeMode.SEPIA_PARCHMENT -> DynamicGradientSpec(
+            topColor = Color(0xFFF4E9D5),
+            middleColor = Color(0xFFECDDC2),
+            bottomColor = Color(0xFFE2CEAB),
+            glowColor = Color(0xFF9C6635).copy(alpha = 0.18f),
+            accentPrimary = Color(0xFF7D4424),
+            accentSecondary = Color(0xFF9F7434),
+            isDarkSurface = false
+        )
+
+        PaperThemeMode.SAKURA_MIST -> DynamicGradientSpec(
+            topColor = Color(0xFFFBF3F6),
+            middleColor = Color(0xFFF5E6EC),
+            bottomColor = Color(0xFFEBDAE3),
+            glowColor = Color(0xFFC9688E).copy(alpha = 0.16f),
+            accentPrimary = Color(0xFFA8426D),
+            accentSecondary = Color(0xFF5F5B8C),
+            isDarkSurface = false
+        )
+
+        PaperThemeMode.DEEP_COSMOS -> DynamicGradientSpec(
+            topColor = Color(0xFF070B1A),
+            middleColor = Color(0xFF101834),
+            bottomColor = Color(0xFF0A0F24),
+            glowColor = Color(0xFF6FA9FF),
+            accentPrimary = Color(0xFF82BAFF),
+            accentSecondary = Color(0xFFF2B86B),
+            isDarkSurface = true
+        )
+
+        PaperThemeMode.CUBIC_BIOME -> DynamicGradientSpec(
+            topColor = Color(0xFF151C16),
+            middleColor = Color(0xFF1F2A1E),
+            bottomColor = Color(0xFF181715),
+            glowColor = Color(0xFF62C95A),
+            accentPrimary = Color(0xFF7CE06E),
+            accentSecondary = Color(0xFFF4B649),
+            isDarkSurface = true
+        )
+
+        PaperThemeMode.OLED_OBSIDIAN -> DynamicGradientSpec(
+            topColor = Color(0xFF000000),
+            middleColor = Color(0xFF060608),
+            bottomColor = Color(0xFF000000),
+            glowColor = Color(0xFFE6B66A).copy(alpha = 0.14f),
+            accentPrimary = Color(0xFFE8BC74),
+            accentSecondary = Color(0xFF9CB4CC),
+            isDarkSurface = true
+        )
+
         PaperThemeMode.DYNAMIC -> resolveDynamicContextGradient(context)
     }
 }

@@ -5,12 +5,15 @@ import android.content.SharedPreferences
 import com.example.data.model.ButterflyEvent
 import com.example.data.model.Campaign
 import com.example.data.model.CampaignTurn
+import com.example.data.model.ChapterBookmark
 import com.example.data.model.HeroSkills
 import com.example.data.model.InventoryItem
 import com.example.data.model.NpcRelation
 import com.example.data.model.PlayerGender
 import com.example.data.model.QuestEntry
+import com.example.data.model.SkillXpState
 import com.example.data.model.TurnStateSnapshot
+import com.example.data.model.UnlockedAchievementRecord
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
@@ -25,17 +28,22 @@ data class CampaignExtendedState(
     val currencyAmount: Long = 0L,
     val currencyLabel: String = "",
     val skills: HeroSkills = HeroSkills(),
+    val skillXp: SkillXpState = SkillXpState(),
+    val skillLevelUpCount: Int = 0,
     val inventoryItems: List<InventoryItem> = emptyList(),
     val quests: List<QuestEntry> = emptyList(),
     val chapterSummaries: List<String> = emptyList(),
-    val turnSnapshots: Map<Long, TurnStateSnapshot> = emptyMap()
+    val turnSnapshots: Map<Long, TurnStateSnapshot> = emptyMap(),
+    val bookmarks: List<ChapterBookmark> = emptyList(),
+    val unlockedAchievements: List<UnlockedAchievementRecord> = emptyList(),
+    val hasForkedChronicle: Boolean = false
 )
 
 /**
- * Local on-device sidecar store for Stage 1-4 extended campaign fields and per-turn snapshots.
- * Ensures full RPG mechanics (structured inventory, quests, skills, numeric vitals, chapter
- * archives, rollback snapshots) work seamlessly even when the remote Firestore security rules
- * have not yet been updated to accept the newer document fields.
+ * Local on-device sidecar store for Stage 1-4 extended campaign fields, per-turn snapshots,
+ * automatic skill XP, chapter bookmarks, and chronicle achievements.
+ * Ensures full RPG mechanics work seamlessly even when the remote Firestore security rules
+ * have not yet been updated to accept newer document fields.
  */
 class CampaignExtendedStore(context: Context) {
 
@@ -61,11 +69,16 @@ class CampaignExtendedStore(context: Context) {
         currencyAmount: Long? = null,
         currencyLabel: String? = null,
         skills: HeroSkills? = null,
+        skillXp: SkillXpState? = null,
+        skillLevelUpCount: Int? = null,
         inventoryItems: List<InventoryItem>? = null,
         quests: List<QuestEntry>? = null,
         chapterSummaries: List<String>? = null,
         turnSnapshot: Pair<Long, TurnStateSnapshot>? = null,
-        pruneSnapshotsAfterTurn: Long? = null
+        pruneSnapshotsAfterTurn: Long? = null,
+        bookmarks: List<ChapterBookmark>? = null,
+        unlockedAchievements: List<UnlockedAchievementRecord>? = null,
+        hasForkedChronicle: Boolean? = null
     ) {
         if (campaignId.isBlank()) return
         val existing = read(campaignId) ?: CampaignExtendedState()
@@ -95,13 +108,41 @@ class CampaignExtendedStore(context: Context) {
             currencyAmount = currencyAmount ?: existing.currencyAmount,
             currencyLabel = currencyLabel ?: existing.currencyLabel,
             skills = skills ?: existing.skills,
+            skillXp = skillXp ?: existing.skillXp,
+            skillLevelUpCount = skillLevelUpCount ?: existing.skillLevelUpCount,
             inventoryItems = inventoryItems ?: existing.inventoryItems,
             quests = quests ?: existing.quests,
             chapterSummaries = chapterSummaries ?: existing.chapterSummaries,
-            turnSnapshots = trimmedSnapshots
+            turnSnapshots = trimmedSnapshots,
+            bookmarks = bookmarks ?: existing.bookmarks,
+            unlockedAchievements = unlockedAchievements ?: existing.unlockedAchievements,
+            hasForkedChronicle = hasForkedChronicle ?: existing.hasForkedChronicle
         )
         prefs.edit().putString(keyFor(campaignId), encodeState(merged).toString()).apply()
         _revision.update { it + 1L }
+    }
+
+    @Synchronized
+    fun toggleBookmark(
+        campaignId: String,
+        turnNumber: Long,
+        excerpt: String,
+        nowMillis: Long = System.currentTimeMillis()
+    ): Boolean {
+        if (campaignId.isBlank()) return false
+        val existing = read(campaignId) ?: CampaignExtendedState()
+        val alreadyExists = existing.bookmarks.any { it.turnNumber == turnNumber }
+        val updated = if (alreadyExists) {
+            existing.bookmarks.filterNot { it.turnNumber == turnNumber }
+        } else {
+            (existing.bookmarks + ChapterBookmark(
+                turnNumber = turnNumber,
+                excerpt = excerpt.replace(Regex("\\s+"), " ").trim().take(180),
+                createdAtMillis = nowMillis
+            )).sortedBy { it.turnNumber }
+        }
+        saveCampaignState(campaignId = campaignId, bookmarks = updated)
+        return !alreadyExists
     }
 
     @Synchronized
@@ -151,10 +192,10 @@ class CampaignExtendedStore(context: Context) {
                 campaign.currencyAmount
             },
             currencyLabel = campaign.currencyLabel.ifBlank { local.currencyLabel },
-            skills = if (campaign.skills == defaultSkills && local.skills != defaultSkills) {
-                local.skills
-            } else {
-                campaign.skills
+            skills = when {
+                local.skillLevelUpCount > 0 -> local.skills
+                campaign.skills == defaultSkills && local.skills != defaultSkills -> local.skills
+                else -> campaign.skills
             },
             inventoryItems = campaign.inventoryItems.ifEmpty { local.inventoryItems },
             quests = campaign.quests.ifEmpty { local.quests },
@@ -197,6 +238,8 @@ class CampaignExtendedStore(context: Context) {
             put("currencyAmount", state.currencyAmount)
             put("currencyLabel", state.currencyLabel)
             put("skills", encodeSkills(state.skills))
+            put("skillXp", encodeSkillXp(state.skillXp))
+            put("skillLevelUpCount", state.skillLevelUpCount)
             put("inventoryItems", JSONArray().apply {
                 state.inventoryItems.forEach { put(encodeItem(it)) }
             })
@@ -211,14 +254,36 @@ class CampaignExtendedStore(context: Context) {
                     put(turnNum.toString(), encodeSnapshot(snap))
                 }
             })
+            put("bookmarks", JSONArray().apply {
+                state.bookmarks.forEach { bm ->
+                    put(JSONObject().apply {
+                        put("turnNumber", bm.turnNumber)
+                        put("excerpt", bm.excerpt)
+                        put("createdAtMillis", bm.createdAtMillis)
+                    })
+                }
+            })
+            put("unlockedAchievements", JSONArray().apply {
+                state.unlockedAchievements.forEach { rec ->
+                    put(JSONObject().apply {
+                        put("id", rec.id)
+                        put("unlockedAtTurn", rec.unlockedAtTurn)
+                        put("unlockedAtMillis", rec.unlockedAtMillis)
+                    })
+                }
+            })
+            put("hasForkedChronicle", state.hasForkedChronicle)
         }
 
         internal fun decodeState(obj: JSONObject): CampaignExtendedState {
             val skillsObj = obj.optJSONObject("skills")
+            val skillXpObj = obj.optJSONObject("skillXp")
             val itemsArr = obj.optJSONArray("inventoryItems")
             val questsArr = obj.optJSONArray("quests")
             val chaptersArr = obj.optJSONArray("chapterSummaries")
             val snapshotsObj = obj.optJSONObject("turnSnapshots")
+            val bookmarksArr = obj.optJSONArray("bookmarks")
+            val achievementsArr = obj.optJSONArray("unlockedAchievements")
 
             val snapshots = LinkedHashMap<Long, TurnStateSnapshot>()
             if (snapshotsObj != null) {
@@ -238,11 +303,69 @@ class CampaignExtendedStore(context: Context) {
                 currencyAmount = obj.optLong("currencyAmount", 0L),
                 currencyLabel = obj.optString("currencyLabel", ""),
                 skills = decodeSkills(skillsObj),
+                skillXp = decodeSkillXp(skillXpObj),
+                skillLevelUpCount = obj.optInt("skillLevelUpCount", 0).coerceAtLeast(0),
                 inventoryItems = decodeItems(itemsArr),
                 quests = decodeQuests(questsArr),
                 chapterSummaries = decodeStringList(chaptersArr),
-                turnSnapshots = snapshots
+                turnSnapshots = snapshots,
+                bookmarks = decodeBookmarks(bookmarksArr),
+                unlockedAchievements = decodeAchievements(achievementsArr),
+                hasForkedChronicle = obj.optBoolean("hasForkedChronicle", false)
             )
+        }
+
+        private fun encodeSkillXp(xp: SkillXpState): JSONObject = JSONObject().apply {
+            put("mightXp", xp.mightXp.coerceAtLeast(0))
+            put("stealthXp", xp.stealthXp.coerceAtLeast(0))
+            put("insightXp", xp.insightXp.coerceAtLeast(0))
+            put("loreXp", xp.loreXp.coerceAtLeast(0))
+        }
+
+        private fun decodeSkillXp(obj: JSONObject?): SkillXpState {
+            if (obj == null) return SkillXpState()
+            return SkillXpState(
+                mightXp = obj.optInt("mightXp", 0).coerceAtLeast(0),
+                stealthXp = obj.optInt("stealthXp", 0).coerceAtLeast(0),
+                insightXp = obj.optInt("insightXp", 0).coerceAtLeast(0),
+                loreXp = obj.optInt("loreXp", 0).coerceAtLeast(0)
+            )
+        }
+
+        private fun decodeBookmarks(arr: JSONArray?): List<ChapterBookmark> {
+            if (arr == null) return emptyList()
+            return buildList {
+                for (i in 0 until arr.length()) {
+                    val o = arr.optJSONObject(i) ?: continue
+                    val turnNumber = o.optLong("turnNumber", 0L)
+                    if (turnNumber <= 0L) continue
+                    add(
+                        ChapterBookmark(
+                            turnNumber = turnNumber,
+                            excerpt = o.optString("excerpt", ""),
+                            createdAtMillis = o.optLong("createdAtMillis", 0L)
+                        )
+                    )
+                }
+            }.distinctBy { it.turnNumber }.sortedBy { it.turnNumber }
+        }
+
+        private fun decodeAchievements(arr: JSONArray?): List<UnlockedAchievementRecord> {
+            if (arr == null) return emptyList()
+            return buildList {
+                for (i in 0 until arr.length()) {
+                    val o = arr.optJSONObject(i) ?: continue
+                    val id = o.optString("id", "").trim()
+                    if (id.isBlank()) continue
+                    add(
+                        UnlockedAchievementRecord(
+                            id = id,
+                            unlockedAtTurn = o.optLong("unlockedAtTurn", 1L),
+                            unlockedAtMillis = o.optLong("unlockedAtMillis", 0L)
+                        )
+                    )
+                }
+            }.distinctBy { it.id }
         }
 
         private fun encodeSkills(skills: HeroSkills): JSONObject = JSONObject().apply {

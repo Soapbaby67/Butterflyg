@@ -48,7 +48,9 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import com.example.data.model.Campaign
 import com.example.data.model.InventoryItem
+import com.example.data.model.SkillProgressionEngine
 import com.example.data.model.SkillType
+import com.example.data.model.SkillXpState
 import com.example.ui.theme.UniverseVisualPalette
 
 @OptIn(ExperimentalMaterial3Api::class)
@@ -93,6 +95,7 @@ fun StatsAndInventoryContent(
     campaign: Campaign,
     stats: ParsedHudStats,
     palette: UniverseVisualPalette,
+    skillXp: SkillXpState = SkillXpState(),
     onItemClick: (InventoryItem) -> Unit,
     onOpenCodex: () -> Unit,
     modifier: Modifier = Modifier
@@ -380,12 +383,15 @@ fun StatsAndInventoryContent(
                         )
                     }
                     Text(
-                        text = "Влияют на шансы в рулетке судьбы и реакции мира.",
+                        text = "Навыки растут автоматически от ваших действий и влияют на шансы в рулетке судьбы.",
                         style = MaterialTheme.typography.labelSmall,
                         color = MaterialTheme.colorScheme.onSurfaceVariant
                     )
                     SkillType.entries.forEach { skill ->
                         val level = stats.skills.levelFor(skill)
+                        val currentXp = skillXp.xpFor(skill)
+                        val requiredXp = SkillProgressionEngine.xpRequiredForNextLevel(level)
+                        val xpFraction = SkillProgressionEngine.progressFraction(level, currentXp)
                         val barColor = when (skill) {
                             SkillType.MIGHT -> palette.choiceForceColor
                             SkillType.STEALTH -> palette.choiceStealthColor
@@ -404,8 +410,12 @@ fun StatsAndInventoryContent(
                                     fontWeight = FontWeight.SemiBold
                                 )
                                 Text(
-                                    text = "$level / 10",
-                                    style = MaterialTheme.typography.labelMedium,
+                                    text = if (requiredXp > 0) {
+                                        "Ур. $level / 10 • $currentXp/$requiredXp XP"
+                                    } else {
+                                        "Ур. 10 / 10 • Макс."
+                                    },
+                                    style = MaterialTheme.typography.labelSmall,
                                     fontWeight = FontWeight.Bold,
                                     color = barColor
                                 )
@@ -419,6 +429,17 @@ fun StatsAndInventoryContent(
                                 color = barColor,
                                 trackColor = MaterialTheme.colorScheme.outlineVariant
                             )
+                            if (requiredXp > 0) {
+                                LinearProgressIndicator(
+                                    progress = { xpFraction },
+                                    modifier = Modifier
+                                        .fillMaxWidth()
+                                        .height(3.dp)
+                                        .clip(RoundedCornerShape(999.dp)),
+                                    color = barColor.copy(alpha = 0.58f),
+                                    trackColor = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.45f)
+                                )
+                            }
                         }
                     }
                 }

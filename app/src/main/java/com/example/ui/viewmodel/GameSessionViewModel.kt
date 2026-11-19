@@ -3,9 +3,14 @@ package com.example.ui.viewmodel
 import android.util.Log
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
+import com.example.data.model.AchievementStatus
 import com.example.data.model.Campaign
 import com.example.data.model.CampaignTurn
+import com.example.data.model.ChronicleAchievementDef
+import com.example.data.model.ChronicleAchievementEngine
 import com.example.data.model.InventoryItem
+import com.example.data.model.SkillLevelUpEvent
+import com.example.data.repository.CampaignExtendedState
 import com.example.data.repository.CampaignRepository
 import com.example.data.repository.GameMasterAiRepository
 import com.example.data.repository.PlayerFactNote
@@ -84,6 +89,50 @@ class GameSessionViewModel(
             initialValue = emptyList()
         )
 
+    val extendedState: StateFlow<CampaignExtendedState> = campaignRepository
+        .observeExtendedState(campaignId)
+        .catch { emit(CampaignExtendedState()) }
+        .stateIn(
+            scope = viewModelScope,
+            started = SharingStarted.WhileSubscribed(STOP_TIMEOUT_MILLIS),
+            initialValue = CampaignExtendedState()
+        )
+
+    private val _recentSkillLevelUp = MutableStateFlow<SkillLevelUpEvent?>(null)
+    val recentSkillLevelUp: StateFlow<SkillLevelUpEvent?> = _recentSkillLevelUp.asStateFlow()
+
+    private val _recentAchievementBanner = MutableStateFlow<ChronicleAchievementDef?>(null)
+    val recentAchievementBanner: StateFlow<ChronicleAchievementDef?> = _recentAchievementBanner.asStateFlow()
+
+    private var hasSeededAchievements = false
+
+    val achievementStatuses: StateFlow<List<AchievementStatus>> = combine(
+        sessionState,
+        extendedState
+    ) { state, ext ->
+        val data = (state as? UiState.Success)?.data ?: return@combine emptyList()
+        val eval = ChronicleAchievementEngine.evaluate(
+            campaign = data.campaign,
+            turns = data.turns,
+            bookmarks = ext.bookmarks,
+            existingRecords = ext.unlockedAchievements,
+            skillLevelUpCount = ext.skillLevelUpCount,
+            hasForkedChronicle = ext.hasForkedChronicle
+        )
+        if (eval.newlyUnlocked.isNotEmpty()) {
+            campaignRepository.saveUnlockedAchievements(campaignId, eval.updatedRecords)
+            if (hasSeededAchievements) {
+                _recentAchievementBanner.value = eval.newlyUnlocked.first()
+            }
+        }
+        hasSeededAchievements = true
+        eval.statuses
+    }.stateIn(
+        scope = viewModelScope,
+        started = SharingStarted.WhileSubscribed(STOP_TIMEOUT_MILLIS),
+        initialValue = emptyList()
+    )
+
     private val _submissionState = MutableStateFlow<TurnSubmissionState>(TurnSubmissionState.Idle)
     val submissionState: StateFlow<TurnSubmissionState> = _submissionState.asStateFlow()
 
@@ -139,9 +188,31 @@ class GameSessionViewModel(
         _actionNotice.value = null
     }
 
+    fun dismissSkillLevelUp() {
+        _recentSkillLevelUp.value = null
+    }
+
+    fun dismissAchievementBanner() {
+        _recentAchievementBanner.value = null
+    }
+
+    fun toggleChapterBookmark(turn: CampaignTurn) {
+        val added = campaignRepository.toggleChapterBookmark(
+            campaignId = campaignId,
+            turnNumber = turn.turnNumber,
+            excerpt = turn.narrative
+        )
+        _actionNotice.value = if (added) {
+            "Глава ${turn.turnNumber} добавлена в закладки."
+        } else {
+            "Закладка главы ${turn.turnNumber} снята."
+        }
+    }
+
     fun submitPlayerAction(
         rawAction: String,
-        isReroll: Boolean = false
+        isReroll: Boolean = false,
+        choiceApproach: String = ""
     ) {
         val action = rawAction.trim()
         if (action.isBlank()) return
@@ -152,7 +223,8 @@ class GameSessionViewModel(
             campaign = currentData.campaign,
             recentTurns = currentData.turns,
             action = action,
-            isReroll = isReroll
+            isReroll = isReroll,
+            choiceApproach = choiceApproach
         )
     }
 
@@ -160,7 +232,8 @@ class GameSessionViewModel(
         campaign: Campaign,
         recentTurns: List<CampaignTurn>,
         action: String,
-        isReroll: Boolean
+        isReroll: Boolean,
+        choiceApproach: String = ""
     ) {
         viewModelScope.launch {
             _streamingNarrative.value = ""
@@ -187,11 +260,15 @@ class GameSessionViewModel(
                         }
                     }
                 )
-                campaignRepository.recordTurn(
+                val progression = campaignRepository.recordTurn(
                     campaign = campaign,
                     playerAction = action,
-                    outcome = outcome
+                    outcome = outcome,
+                    choiceApproach = choiceApproach
                 )
+                if (progression.levelUp != null) {
+                    _recentSkillLevelUp.value = progression.levelUp
+                }
                 clearDraftAction()
                 _streamingNarrative.value = ""
                 _submissionState.value = TurnSubmissionState.Idle

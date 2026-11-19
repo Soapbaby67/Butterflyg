@@ -4,7 +4,8 @@ import androidx.compose.foundation.layout.Column
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.automirrored.outlined.Undo
-import androidx.compose.material.icons.outlined.EditNote
+import androidx.compose.material.icons.outlined.AutoStories
+import androidx.compose.material.icons.outlined.Search
 import androidx.compose.material.icons.outlined.Settings
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.Icon
@@ -20,7 +21,6 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
-import com.example.ui.components.SoundToggleButton
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -28,18 +28,17 @@ internal fun SessionTopBar(
     title: String,
     subtitle: String?,
     currentPage: Int,
-    codexTab: Int,
     hasSessionData: Boolean,
-    pinnedFactsCount: Int,
     canRollback: Boolean,
     isBusy: Boolean,
-    soundEnabled: Boolean,
+    focusReadingMode: Boolean,
+    bookmarksCount: Int,
     topBarContainerColor: Color,
     accentPrimary: Color,
     onBackClick: () -> Unit,
+    onToggleFocusReading: () -> Unit,
+    onOpenChapterSearch: () -> Unit,
     onRollbackClick: () -> Unit,
-    onFactsClick: () -> Unit,
-    onToggleSound: () -> Unit,
     onOpenSettings: () -> Unit
 ) {
     TopAppBar(
@@ -86,7 +85,43 @@ internal fun SessionTopBar(
         },
         actions = {
             if (hasSessionData) {
-                if (canRollback) {
+                IconButton(
+                    onClick = onToggleFocusReading,
+                    modifier = Modifier
+                        .minimumInteractiveComponentSize()
+                        .testTag("toggle_focus_reading_button")
+                ) {
+                    Icon(
+                        imageVector = Icons.Outlined.AutoStories,
+                        contentDescription = if (focusReadingMode) {
+                            "Выйти из режима чтения"
+                        } else {
+                            "Компактный режим чтения"
+                        },
+                        tint = if (focusReadingMode) {
+                            accentPrimary
+                        } else {
+                            MaterialTheme.colorScheme.onBackground
+                        }
+                    )
+                }
+                IconButton(
+                    onClick = onOpenChapterSearch,
+                    modifier = Modifier
+                        .minimumInteractiveComponentSize()
+                        .testTag("open_chapter_search_button")
+                ) {
+                    Icon(
+                        imageVector = Icons.Outlined.Search,
+                        contentDescription = "Поиск по главам и закладки ($bookmarksCount)",
+                        tint = if (bookmarksCount > 0) {
+                            accentPrimary
+                        } else {
+                            MaterialTheme.colorScheme.onBackground
+                        }
+                    )
+                }
+                if (canRollback && !focusReadingMode) {
                     IconButton(
                         onClick = onRollbackClick,
                         enabled = !isBusy,
@@ -105,29 +140,7 @@ internal fun SessionTopBar(
                         )
                     }
                 }
-                IconButton(
-                    onClick = onFactsClick,
-                    modifier = Modifier
-                        .minimumInteractiveComponentSize()
-                        .testTag("open_facts_button")
-                ) {
-                    Icon(
-                        imageVector = Icons.Outlined.EditNote,
-                        contentDescription = "Блокнот фактов ($pinnedFactsCount)",
-                        tint = if (currentPage == 2 && codexTab == 3) {
-                            accentPrimary
-                        } else if (pinnedFactsCount > 0) {
-                            accentPrimary
-                        } else {
-                            MaterialTheme.colorScheme.onBackground
-                        }
-                    )
-                }
             }
-            SoundToggleButton(
-                soundEnabled = soundEnabled,
-                onToggleSound = onToggleSound
-            )
             IconButton(
                 onClick = onOpenSettings,
                 modifier = Modifier
@@ -136,7 +149,7 @@ internal fun SessionTopBar(
             ) {
                 Icon(
                     imageVector = Icons.Outlined.Settings,
-                    contentDescription = "Настройки чтения и ИИ"
+                    contentDescription = "Настройки чтения, тем, шрифтов и ИИ"
                 )
             }
         }

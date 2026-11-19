@@ -25,7 +25,11 @@ import com.example.ui.theme.DynamicThemeContext
 import com.example.ui.theme.NpcArchetype
 import com.example.ui.theme.NpcPortraitSpec
 import com.example.ui.theme.UniverseArchetype
+import com.example.ui.theme.InterFontFamily
 import com.example.ui.theme.WeatherMood
+import com.example.ui.theme.buildChroniclesTypography
+import com.example.ui.theme.fontMetricsFor
+import com.example.ui.theme.readingFontFamilyFor
 import com.example.ui.theme.resolveDynamicGradientSpec
 import com.example.ui.theme.resolveNpcPortraitSpec
 import com.example.ui.theme.resolveSceneBackdropRes
@@ -247,8 +251,36 @@ class HudStatsAndVisualThemeTest {
         assertEquals("gemini-3.5-flash-lite", defaults.aiModel.modelId)
         assertEquals(ReadingFontStyle.LITERATA, defaults.fontStyle)
         assertEquals(ReadingFontScale.NORMAL, defaults.fontScale)
+        assertTrue(defaults.applyFontToWholeUi)
+        assertFalse(defaults.focusReadingMode)
         assertFalse(AiModelChoice.entries.any { it.modelId.contains("argon", ignoreCase = true) })
-        assertEquals(5, ReadingFontStyle.entries.size)
+        assertEquals(13, ReadingFontStyle.entries.size)
+
+        // Every font style resolves a valid family, metrics tuning, and updates whole-UI typography when enabled
+        ReadingFontStyle.entries.forEach { style ->
+            val family = readingFontFamilyFor(style)
+            val metrics = fontMetricsFor(style)
+            assertTrue(metrics.bodyMultiplier > 0.5f)
+            assertTrue(metrics.lineHeightBoost >= 1.0f)
+
+            val wholeUiTypo = buildChroniclesTypography(
+                fontStyle = style,
+                fontScale = ReadingFontScale.NORMAL,
+                applyToWholeUi = true
+            )
+            assertEquals(family, wholeUiTypo.bodyLarge.fontFamily)
+            assertEquals(family, wholeUiTypo.titleMedium.fontFamily)
+            assertEquals(family, wholeUiTypo.labelLarge.fontFamily)
+
+            val storyOnlyTypo = buildChroniclesTypography(
+                fontStyle = style,
+                fontScale = ReadingFontScale.NORMAL,
+                applyToWholeUi = false
+            )
+            assertEquals(family, storyOnlyTypo.bodyLarge.fontFamily)
+            assertEquals(InterFontFamily, storyOnlyTypo.bodyMedium.fontFamily)
+            assertEquals(InterFontFamily, storyOnlyTypo.labelLarge.fontFamily)
+        }
     }
 
     @Test
@@ -302,7 +334,19 @@ class HudStatsAndVisualThemeTest {
     fun dynamicGradientAdaptsToLocationUniverseWeatherAndEmotion() {
         val defaults = UserAppSettings()
         assertEquals(PaperThemeMode.DYNAMIC, defaults.themeMode)
-        assertEquals(5, PaperThemeMode.entries.size)
+        assertEquals(12, PaperThemeMode.entries.size)
+
+        // All 12 themes resolve valid non-crashing gradient specs respecting light/dark surface flags
+        PaperThemeMode.entries.forEach { mode ->
+            val spec = resolveDynamicGradientSpec(
+                themeMode = mode,
+                isSystemDark = false,
+                context = DynamicThemeContext(location = AppVisualLocation.GAME)
+            )
+            if (mode != PaperThemeMode.SYSTEM && mode != PaperThemeMode.DYNAMIC) {
+                assertEquals(!mode.isLightPalette, spec.isDarkSurface)
+            }
+        }
 
         val shelfSpec = resolveDynamicGradientSpec(
             themeMode = PaperThemeMode.DYNAMIC,
@@ -334,9 +378,22 @@ class HudStatsAndVisualThemeTest {
             isSystemDark = true,
             context = DynamicThemeContext(location = AppVisualLocation.GAME)
         )
+        val cubicSpec = resolveDynamicGradientSpec(
+            themeMode = PaperThemeMode.CUBIC_BIOME,
+            isSystemDark = false,
+            context = DynamicThemeContext(location = AppVisualLocation.GAME)
+        )
+        val oledSpec = resolveDynamicGradientSpec(
+            themeMode = PaperThemeMode.OLED_OBSIDIAN,
+            isSystemDark = false,
+            context = DynamicThemeContext(location = AppVisualLocation.GAME)
+        )
 
         assertTrue(shelfSpec.isDarkSurface)
         assertFalse(lightPaperSpec.isDarkSurface)
+        assertTrue(cubicSpec.isDarkSurface)
+        assertTrue(oledSpec.isDarkSurface)
+        assertNotEquals(cubicSpec.topColor, oledSpec.topColor)
         assertNotEquals(shelfSpec.topColor, cozyJoySpec.topColor)
         assertNotEquals(cozyJoySpec.middleColor, cyberRainFearSpec.middleColor)
         assertNotEquals(cozyJoySpec.glowColor, cyberRainFearSpec.glowColor)

@@ -661,9 +661,16 @@ fun PaperThemeToggleButton(
 ) {
     val icon = when (themeMode) {
         PaperThemeMode.DYNAMIC -> Icons.Outlined.AutoAwesome
-        PaperThemeMode.LIGHT -> Icons.Outlined.LightMode
-        PaperThemeMode.DARK -> Icons.Outlined.DarkMode
-        PaperThemeMode.NEON -> Icons.Outlined.Flare
+        PaperThemeMode.LIGHT,
+        PaperThemeMode.SEPIA_PARCHMENT,
+        PaperThemeMode.SAKURA_MIST -> Icons.Outlined.LightMode
+        PaperThemeMode.DARK,
+        PaperThemeMode.EMERALD_FOREST,
+        PaperThemeMode.CRIMSON_VELVET,
+        PaperThemeMode.DEEP_COSMOS,
+        PaperThemeMode.OLED_OBSIDIAN -> Icons.Outlined.DarkMode
+        PaperThemeMode.NEON,
+        PaperThemeMode.CUBIC_BIOME -> Icons.Outlined.Flare
         PaperThemeMode.SYSTEM -> Icons.Outlined.Tonality
     }
     IconButton(

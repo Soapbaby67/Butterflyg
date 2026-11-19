@@ -18,7 +18,9 @@ import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.Bookmark
 import androidx.compose.material.icons.outlined.AutoStories
+import androidx.compose.material.icons.outlined.BookmarkBorder
 import androidx.compose.material.icons.outlined.CallSplit
 import androidx.compose.material.icons.outlined.Close
 import androidx.compose.material.icons.outlined.ExpandLess
@@ -52,11 +54,13 @@ import com.example.data.model.CampaignTurn
 internal fun PastChaptersSection(
     earlierTurns: List<CampaignTurn>,
     chapterSummaries: List<String>,
+    bookmarkedTurns: Set<Long> = emptySet(),
     expanded: Boolean,
     isBusy: Boolean,
     accentPrimary: Color,
     accentSecondary: Color,
     onToggleExpanded: () -> Unit,
+    onToggleBookmark: (CampaignTurn) -> Unit = {},
     onForkAtTurn: (Long) -> Unit
 ) {
     var searchQuery by rememberSaveable { mutableStateOf("") }
@@ -229,8 +233,11 @@ internal fun PastChaptersSection(
                     filteredTurns.forEach { pastTurn ->
                         PastChapterCard(
                             turn = pastTurn,
+                            isBookmarked = pastTurn.turnNumber in bookmarkedTurns,
                             accentColor = accentPrimary,
+                            secondaryColor = accentSecondary,
                             isBusy = isBusy,
+                            onToggleBookmark = { onToggleBookmark(pastTurn) },
                             onForkHere = { onForkAtTurn(pastTurn.turnNumber) }
                         )
                     }
@@ -243,8 +250,11 @@ internal fun PastChaptersSection(
 @Composable
 private fun PastChapterCard(
     turn: CampaignTurn,
+    isBookmarked: Boolean,
     accentColor: Color,
+    secondaryColor: Color,
     isBusy: Boolean,
+    onToggleBookmark: () -> Unit,
     onForkHere: () -> Unit
 ) {
     val narratorBubbleShape = RoundedCornerShape(
@@ -256,7 +266,10 @@ private fun PastChapterCard(
     Surface(
         color = MaterialTheme.colorScheme.surface.copy(alpha = 0.76f),
         shape = narratorBubbleShape,
-        border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant),
+        border = BorderStroke(
+            width = 1.dp,
+            color = if (isBookmarked) secondaryColor.copy(alpha = 0.55f) else MaterialTheme.colorScheme.outlineVariant
+        ),
         modifier = Modifier.fillMaxWidth()
     ) {
         Column(
@@ -274,22 +287,35 @@ private fun PastChapterCard(
                     fontWeight = FontWeight.SemiBold,
                     color = accentColor
                 )
-                TextButton(
-                    onClick = onForkHere,
-                    enabled = !isBusy,
-                    contentPadding = PaddingValues(horizontal = 8.dp, vertical = 2.dp),
-                    modifier = Modifier.testTag("fork_turn_${turn.turnNumber}")
-                ) {
-                    Icon(
-                        imageVector = Icons.Outlined.CallSplit,
-                        contentDescription = null,
-                        modifier = Modifier.size(14.dp)
-                    )
-                    Spacer(modifier = Modifier.width(4.dp))
-                    Text(
-                        text = "Ответвить от хода ${turn.turnNumber}",
-                        style = MaterialTheme.typography.labelSmall
-                    )
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    IconButton(
+                        onClick = onToggleBookmark,
+                        modifier = Modifier.size(32.dp)
+                    ) {
+                        Icon(
+                            imageVector = if (isBookmarked) Icons.Filled.Bookmark else Icons.Outlined.BookmarkBorder,
+                            contentDescription = if (isBookmarked) "Убрать закладку" else "В закладки",
+                            tint = if (isBookmarked) secondaryColor else MaterialTheme.colorScheme.onSurfaceVariant,
+                            modifier = Modifier.size(16.dp)
+                        )
+                    }
+                    TextButton(
+                        onClick = onForkHere,
+                        enabled = !isBusy,
+                        contentPadding = PaddingValues(horizontal = 8.dp, vertical = 2.dp),
+                        modifier = Modifier.testTag("fork_turn_${turn.turnNumber}")
+                    ) {
+                        Icon(
+                            imageVector = Icons.Outlined.CallSplit,
+                            contentDescription = null,
+                            modifier = Modifier.size(14.dp)
+                        )
+                        Spacer(modifier = Modifier.width(4.dp))
+                        Text(
+                            text = "Ответвить от хода ${turn.turnNumber}",
+                            style = MaterialTheme.typography.labelSmall
+                        )
+                    }
                 }
             }
             if (turn.turnNumber > 1L && turn.playerAction.isNotBlank()) {

@@ -74,6 +74,7 @@ fun SettingsBottomSheet(
     onSelectTheme: (PaperThemeMode) -> Unit,
     onSelectFontStyle: (ReadingFontStyle) -> Unit,
     onSelectFontScale: (ReadingFontScale) -> Unit,
+    onToggleApplyFontToWholeUi: (Boolean) -> Unit = {},
     onSelectAiModel: (AiModelChoice) -> Unit,
     onSelectNarrativePace: (NarrativePace) -> Unit = {},
     onToggleLiveStreaming: (Boolean) -> Unit,
@@ -110,63 +111,244 @@ fun SettingsBottomSheet(
                 modifier = Modifier.testTag("settings_sheet_title")
             )
 
-            // 1. App Theme (Dynamic Gradient default + Paper/Neon modes)
-            SettingsSectionHeader(title = "Тема оформления")
+            // 1. App Theme (12 rich themes with live multi-swatch preview cards)
+            SettingsSectionHeader(title = "Тема оформления (${PaperThemeMode.entries.size})")
             Text(
-                text = "«Динамический градиент» подстраивает цвета под раздел приложения, вселенную и настроение текущей сцены.",
+                text = "«Динамический градиент» подстраивает цвета под вселенную и настроение сцены, а фиксированные темы задают постоянную палитру.",
                 style = MaterialTheme.typography.bodySmall,
                 color = MaterialTheme.colorScheme.onSurfaceVariant
             )
-            FlowRow(
-                horizontalArrangement = Arrangement.spacedBy(8.dp),
-                verticalArrangement = Arrangement.spacedBy(8.dp)
-            ) {
-                PaperThemeMode.entries.forEach { mode ->
-                    val swatchColors = when (mode) {
-                        PaperThemeMode.DYNAMIC -> listOf(Color(0xFFE58C8A), Color(0xFFDFB268), Color(0xFF4BE1F2))
-                        PaperThemeMode.LIGHT -> listOf(Color(0xFFFAF6EE), Color(0xFF7C2D32))
-                        PaperThemeMode.DARK -> listOf(Color(0xFF1C1A17), Color(0xFFD4757B))
-                        PaperThemeMode.NEON -> listOf(Color(0xFF0A0E1B), Color(0xFF4BE1F2), Color(0xFFF26D9A))
-                        PaperThemeMode.SYSTEM -> listOf(Color(0xFFFAF6EE), Color(0xFF1C1A17))
-                    }
-                    FilterChip(
-                        selected = settings.themeMode == mode,
-                        onClick = { onSelectTheme(mode) },
-                        leadingIcon = {
-                            Box(
+            Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                PaperThemeMode.entries.chunked(2).forEach { rowModes ->
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.spacedBy(8.dp)
+                    ) {
+                        rowModes.forEach { mode ->
+                            val selected = settings.themeMode == mode
+                            val swatchColors = themeSwatchColorsFor(mode)
+                            Surface(
+                                color = if (selected) {
+                                    MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.55f)
+                                } else {
+                                    MaterialTheme.colorScheme.background
+                                },
+                                shape = MaterialTheme.shapes.medium,
+                                border = BorderStroke(
+                                    width = if (selected) 1.6.dp else 1.dp,
+                                    color = if (selected) {
+                                        MaterialTheme.colorScheme.primary
+                                    } else {
+                                        MaterialTheme.colorScheme.outlineVariant
+                                    }
+                                ),
                                 modifier = Modifier
-                                    .size(16.dp)
-                                    .clip(CircleShape)
-                                    .background(Brush.linearGradient(swatchColors))
-                            )
-                        },
-                        label = { Text(mode.labelRu) },
-                        modifier = Modifier.testTag("settings_theme_${mode.key}")
-                    )
+                                    .weight(1f)
+                                    .clip(MaterialTheme.shapes.medium)
+                                    .clickable {
+                                        audio?.playSfx(SfxEvent.UI_TAP)
+                                        onSelectTheme(mode)
+                                    }
+                                    .testTag("settings_theme_${mode.key}")
+                            ) {
+                                Column(
+                                    modifier = Modifier.padding(horizontal = 10.dp, vertical = 9.dp),
+                                    verticalArrangement = Arrangement.spacedBy(6.dp)
+                                ) {
+                                    Row(
+                                        modifier = Modifier.fillMaxWidth(),
+                                        horizontalArrangement = Arrangement.SpaceBetween,
+                                        verticalAlignment = Alignment.CenterVertically
+                                    ) {
+                                        // Mini palette bar showing background + accents
+                                        Row(horizontalArrangement = Arrangement.spacedBy(4.dp)) {
+                                            swatchColors.forEach { swatch ->
+                                                Box(
+                                                    modifier = Modifier
+                                                        .size(14.dp)
+                                                        .clip(CircleShape)
+                                                        .background(swatch)
+                                                )
+                                            }
+                                        }
+                                        if (selected) {
+                                            Icon(
+                                                imageVector = Icons.Outlined.CheckCircle,
+                                                contentDescription = "Выбрано",
+                                                tint = MaterialTheme.colorScheme.primary,
+                                                modifier = Modifier.size(16.dp)
+                                            )
+                                        }
+                                    }
+                                    Text(
+                                        text = mode.labelRu,
+                                        style = MaterialTheme.typography.labelLarge,
+                                        fontWeight = FontWeight.SemiBold,
+                                        color = MaterialTheme.colorScheme.onSurface,
+                                        maxLines = 1
+                                    )
+                                    Text(
+                                        text = mode.subtitleRu,
+                                        style = MaterialTheme.typography.labelSmall,
+                                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                        maxLines = 2
+                                    )
+                                }
+                            }
+                        }
+                        if (rowModes.size == 1) {
+                            Spacer(modifier = Modifier.weight(1f))
+                        }
+                    }
                 }
             }
 
             HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant)
 
-            // 2. Font Customization (Family + Size + Live Preview)
-            SettingsSectionHeader(title = "Шрифт повествования")
-            FlowRow(
-                horizontalArrangement = Arrangement.spacedBy(8.dp),
-                verticalArrangement = Arrangement.spacedBy(8.dp)
+            // 2. Font Customization (13 distinct Cyrillic fonts + Whole-UI scope + Scale + Live Preview)
+            SettingsSectionHeader(title = "Шрифт и типографика (${ReadingFontStyle.entries.size})")
+            Text(
+                text = "Каждая гарнитура поддерживает полную русскую кириллицу — от пиксельного «Майнкрафта» и рукописного дневника до древней летописи.",
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant
+            )
+
+            // Scope toggle: apply font across the entire UI or narrative only
+            Surface(
+                color = MaterialTheme.colorScheme.background,
+                shape = MaterialTheme.shapes.medium,
+                border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant),
+                modifier = Modifier.fillMaxWidth()
             ) {
-                ReadingFontStyle.entries.forEach { style ->
-                    val family = readingFontFamilyFor(style)
-                    FilterChip(
-                        selected = settings.fontStyle == style,
-                        onClick = { onSelectFontStyle(style) },
-                        label = {
-                            Text(
-                                text = style.labelRu,
-                                fontFamily = family
-                            )
-                        },
-                        modifier = Modifier.testTag("settings_font_${style.key}")
+                Row(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(horizontal = 12.dp, vertical = 8.dp),
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.SpaceBetween
+                ) {
+                    Column(
+                        modifier = Modifier
+                            .weight(1f)
+                            .padding(end = 10.dp),
+                        verticalArrangement = Arrangement.spacedBy(2.dp)
+                    ) {
+                        Text(
+                            text = "Применять ко всему интерфейсу",
+                            style = MaterialTheme.typography.titleSmall,
+                            fontWeight = FontWeight.SemiBold,
+                            color = MaterialTheme.colorScheme.onSurface
+                        )
+                        Text(
+                            text = if (settings.applyFontToWholeUi) {
+                                "Меняет заголовки, карточки выборов, меню и текст глав"
+                            } else {
+                                "Меняет только текст повествования и заголовки глав"
+                            },
+                            style = MaterialTheme.typography.bodySmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant
+                        )
+                    }
+                    Switch(
+                        checked = settings.applyFontToWholeUi,
+                        onCheckedChange = onToggleApplyFontToWholeUi,
+                        modifier = Modifier.testTag("settings_font_whole_ui_switch")
                     )
+                }
+            }
+
+            Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                ReadingFontStyle.entries.chunked(2).forEach { rowFonts ->
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.spacedBy(8.dp)
+                    ) {
+                        rowFonts.forEach { style ->
+                            val selected = settings.fontStyle == style
+                            val family = readingFontFamilyFor(style)
+                            val sampleSize = when (style) {
+                                ReadingFontStyle.MINECRAFT_PIXEL -> 9.5.sp
+                                ReadingFontStyle.AUTHOR_DIARY,
+                                ReadingFontStyle.QUILL_SCRIPT -> 15.sp
+                                ReadingFontStyle.ARCADE_16 -> 14.sp
+                                else -> 12.sp
+                            }
+                            Surface(
+                                color = if (selected) {
+                                    MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.55f)
+                                } else {
+                                    MaterialTheme.colorScheme.background
+                                },
+                                shape = MaterialTheme.shapes.medium,
+                                border = BorderStroke(
+                                    width = if (selected) 1.6.dp else 1.dp,
+                                    color = if (selected) {
+                                        MaterialTheme.colorScheme.primary
+                                    } else {
+                                        MaterialTheme.colorScheme.outlineVariant
+                                    }
+                                ),
+                                modifier = Modifier
+                                    .weight(1f)
+                                    .clip(MaterialTheme.shapes.medium)
+                                    .clickable {
+                                        audio?.playSfx(SfxEvent.UI_TAP)
+                                        onSelectFontStyle(style)
+                                    }
+                                    .testTag("settings_font_${style.key}")
+                            ) {
+                                Column(
+                                    modifier = Modifier.padding(horizontal = 10.dp, vertical = 9.dp),
+                                    verticalArrangement = Arrangement.spacedBy(4.dp)
+                                ) {
+                                    Row(
+                                        modifier = Modifier.fillMaxWidth(),
+                                        horizontalArrangement = Arrangement.SpaceBetween,
+                                        verticalAlignment = Alignment.CenterVertically
+                                    ) {
+                                        Text(
+                                            text = style.labelRu,
+                                            fontFamily = family,
+                                            fontSize = if (style == ReadingFontStyle.MINECRAFT_PIXEL) 10.5.sp else 14.sp,
+                                            fontWeight = FontWeight.SemiBold,
+                                            color = if (selected) {
+                                                MaterialTheme.colorScheme.primary
+                                            } else {
+                                                MaterialTheme.colorScheme.onSurface
+                                            },
+                                            maxLines = 1,
+                                            modifier = Modifier.weight(1f)
+                                        )
+                                        if (selected) {
+                                            Icon(
+                                                imageVector = Icons.Outlined.CheckCircle,
+                                                contentDescription = "Выбрано",
+                                                tint = MaterialTheme.colorScheme.primary,
+                                                modifier = Modifier.size(15.dp)
+                                            )
+                                        }
+                                    }
+                                    Text(
+                                        text = style.samplePhraseRu,
+                                        fontFamily = family,
+                                        fontSize = sampleSize,
+                                        lineHeight = (sampleSize.value * 1.38f).sp,
+                                        color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.85f),
+                                        maxLines = 2
+                                    )
+                                    Text(
+                                        text = style.subtitleRu,
+                                        style = MaterialTheme.typography.labelSmall,
+                                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                        maxLines = 1
+                                    )
+                                }
+                            }
+                        }
+                        if (rowFonts.size == 1) {
+                            Spacer(modifier = Modifier.weight(1f))
+                        }
+                    }
                 }
             }
 
@@ -203,8 +385,9 @@ fun SettingsBottomSheet(
 
             // Live Russian Preview Card
             val previewFamily = readingFontFamilyFor(settings.fontStyle)
-            val previewSize = (16f * settings.fontScale.multiplier).sp
-            val previewLineHeight = (24.5f * settings.fontScale.multiplier).sp
+            val previewMetrics = com.example.ui.theme.fontMetricsFor(settings.fontStyle)
+            val previewSize = (16f * previewMetrics.bodyMultiplier * settings.fontScale.multiplier).sp
+            val previewLineHeight = (25f * previewMetrics.bodyMultiplier * previewMetrics.lineHeightBoost * settings.fontScale.multiplier).sp
             Surface(
                 color = MaterialTheme.colorScheme.background,
                 shape = MaterialTheme.shapes.medium,
@@ -624,4 +807,19 @@ private fun SettingsSwitchRow(
             )
         }
     }
+}
+
+private fun themeSwatchColorsFor(mode: PaperThemeMode): List<Color> = when (mode) {
+    PaperThemeMode.DYNAMIC -> listOf(Color(0xFFE58C8A), Color(0xFFDFB268), Color(0xFF4BE1F2))
+    PaperThemeMode.LIGHT -> listOf(Color(0xFFFAF6EE), Color(0xFF7C2D32), Color(0xFFB58A4A))
+    PaperThemeMode.DARK -> listOf(Color(0xFF1C1A17), Color(0xFFD4757B), Color(0xFFC59B5F))
+    PaperThemeMode.NEON -> listOf(Color(0xFF0A0E1B), Color(0xFF4BE1F2), Color(0xFFF26D9A))
+    PaperThemeMode.EMERALD_FOREST -> listOf(Color(0xFF0B1914), Color(0xFF56D6A2), Color(0xFFD9B462))
+    PaperThemeMode.CRIMSON_VELVET -> listOf(Color(0xFF180C12), Color(0xFFEB6B84), Color(0xFFD4C1B8))
+    PaperThemeMode.SEPIA_PARCHMENT -> listOf(Color(0xFFF4E9D5), Color(0xFF7D4424), Color(0xFF9F7434))
+    PaperThemeMode.SAKURA_MIST -> listOf(Color(0xFFFBF3F6), Color(0xFFA8426D), Color(0xFF5F5B8C))
+    PaperThemeMode.DEEP_COSMOS -> listOf(Color(0xFF070B1A), Color(0xFF82BAFF), Color(0xFFF2B86B))
+    PaperThemeMode.CUBIC_BIOME -> listOf(Color(0xFF151C16), Color(0xFF7CE06E), Color(0xFFF4B649))
+    PaperThemeMode.OLED_OBSIDIAN -> listOf(Color(0xFF000000), Color(0xFFE8BC74), Color(0xFF9CB4CC))
+    PaperThemeMode.SYSTEM -> listOf(Color(0xFFFAF6EE), Color(0xFF1C1A17), Color(0xFF7C2D32))
 }

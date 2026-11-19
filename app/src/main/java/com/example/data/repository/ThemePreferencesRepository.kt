@@ -9,12 +9,24 @@ import androidx.datastore.preferences.preferencesDataStore
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.map
 
-enum class PaperThemeMode(val key: String, val labelRu: String) {
-    DYNAMIC("dynamic", "Динамический градиент"),
-    LIGHT("light", "Светлая бумага"),
-    DARK("dark", "Тёмная бумага"),
-    NEON("neon", "Ночной неон"),
-    SYSTEM("system", "Системная");
+enum class PaperThemeMode(
+    val key: String,
+    val labelRu: String,
+    val subtitleRu: String,
+    val isLightPalette: Boolean = false
+) {
+    DYNAMIC("dynamic", "Динамический градиент", "Подстраивается под сцену и мир"),
+    LIGHT("light", "Светлая бумага", "Классический книжный лист", isLightPalette = true),
+    DARK("dark", "Тёмная бумага", "Тёплый вечерний пергамент"),
+    NEON("neon", "Ночной неон", "Киберпанк и неоновый циан"),
+    EMERALD_FOREST("emerald_forest", "Изумрудный лес", "Хвойный сумрак и золотистый мох"),
+    CRIMSON_VELVET("crimson_velvet", "Алый бархат", "Готический обсидиан и гранат"),
+    SEPIA_PARCHMENT("sepia_parchment", "Сепия пергамента", "Винтажная тёплая бумага", isLightPalette = true),
+    SAKURA_MIST("sakura_mist", "Сакура и туман", "Рисовый шёлк и нежные лепестки", isLightPalette = true),
+    DEEP_COSMOS("deep_cosmos", "Глубокий космос", "Звёздный ультрамарин и лунный свет"),
+    CUBIC_BIOME("cubic_biome", "Кубический мир", "Изумрудная листва и факельный янтарь"),
+    OLED_OBSIDIAN("oled_obsidian", "OLED-Обсидиан", "Абсолютно чёрный фон для ночи"),
+    SYSTEM("system", "Системная", "Как в настройках устройства");
 
     companion object {
         fun fromKey(key: String?): PaperThemeMode =
@@ -86,13 +98,22 @@ enum class NarrativePace(
 enum class ReadingFontStyle(
     val key: String,
     val labelRu: String,
-    val subtitleRu: String
+    val subtitleRu: String,
+    val samplePhraseRu: String = "Взмах крыла меняет ход судьбы"
 ) {
-    LITERATA("literata", "Книжный", "Классическая антиква"),
-    PLAYFAIR("playfair", "Роман", "Выразительный журнальный"),
-    NUNITO("nunito", "Уютный", "Мягкий для долгого чтения"),
-    INTER("inter", "Чистый", "Современный минимализм"),
-    JETBRAINS_MONO("jetbrains_mono", "Терминал", "Моноширинный Sci-Fi");
+    LITERATA("literata", "Книжный", "Классическая антиква", "Страницы древнего тома шелестят"),
+    PLAYFAIR("playfair", "Роман", "Выразительный журнальный", "Вечерний свет ложится на витраж"),
+    NUNITO("nunito", "Уютный", "Мягкий для долгого чтения", "Тёплый чай и тихий голос дождя"),
+    INTER("inter", "Чистый", "Современный минимализм", "Ясный ритм и точность каждой детали"),
+    MINECRAFT_PIXEL("minecraft_pixel", "Майнкрафт", "Культовый 8-бит пиксель", "НОВЫЙ БИОМ • КРАФТ И ПРИКЛЮЧЕНИЕ"),
+    ARCADE_16("arcade_16", "Аркада 16-бит", "Чёткий пиксель для RPG", "Уровень повышен: +1 к Скрытности"),
+    AUTHOR_DIARY("author_diary", "Авторский дневник", "Живой рукописный почерк", "Запись от руки на полях хроники…"),
+    QUILL_SCRIPT("quill_script", "Пергаментное перо", "Каллиграфический авторский", "Письмо, запечатанное алым сургучом"),
+    ANCIENT_CHRONICLE("ancient_chronicle", "Древняя летопись", "Славянско-фэнтезийный стиль", "Сказание о вратах и забытых клятвах"),
+    CYBER_DISPLAY("cyber_display", "Кибер-дисплей", "Футуристичный техно-шрифт", "СЕКТОР 09 // ПРОТОКОЛ БАБОЧКИ"),
+    INDIE_GRUNGE("indie_grunge", "Авторский гранж", "Характерный инди-шрифт", "Город не прощает лишних вопросов"),
+    NOIR_TYPEWRITER("noir_typewriter", "Нуар-машинка", "Печатная машинка детектива", "ДЕЛО №47: улика на старом причале"),
+    JETBRAINS_MONO("jetbrains_mono", "Терминал", "Моноширинный Sci-Fi", "system.log :: deviation = 42%");
 
     companion object {
         fun fromKey(key: String?): ReadingFontStyle =
@@ -122,6 +143,8 @@ data class UserAppSettings(
     val narrativePace: NarrativePace = NarrativePace.BOOKISH,
     val fontStyle: ReadingFontStyle = ReadingFontStyle.LITERATA,
     val fontScale: ReadingFontScale = ReadingFontScale.NORMAL,
+    val applyFontToWholeUi: Boolean = true,
+    val focusReadingMode: Boolean = false,
     val liveStreamingEnabled: Boolean = true,
     val hapticsEnabled: Boolean = true,
     val soundEnabled: Boolean = true,
@@ -138,6 +161,8 @@ class ThemePreferencesRepository(private val context: Context) {
     private val narrativePaceKey = stringPreferencesKey("ai_narrative_pace")
     private val fontStyleKey = stringPreferencesKey("reading_font_style")
     private val fontScaleKey = stringPreferencesKey("reading_font_scale")
+    private val applyFontToWholeUiKey = booleanPreferencesKey("apply_font_to_whole_ui")
+    private val focusReadingModeKey = booleanPreferencesKey("focus_reading_mode")
     private val liveStreamingKey = booleanPreferencesKey("live_streaming_enabled")
     private val hapticsKey = booleanPreferencesKey("haptics_enabled")
     private val soundEnabledKey = booleanPreferencesKey("sound_enabled")
@@ -155,6 +180,8 @@ class ThemePreferencesRepository(private val context: Context) {
             narrativePace = NarrativePace.fromKey(prefs[narrativePaceKey]),
             fontStyle = ReadingFontStyle.fromKey(prefs[fontStyleKey]),
             fontScale = ReadingFontScale.fromKey(prefs[fontScaleKey]),
+            applyFontToWholeUi = prefs[applyFontToWholeUiKey] ?: true,
+            focusReadingMode = prefs[focusReadingModeKey] ?: false,
             liveStreamingEnabled = prefs[liveStreamingKey] ?: true,
             hapticsEnabled = prefs[hapticsKey] ?: true,
             soundEnabled = prefs[soundEnabledKey] ?: true,
@@ -216,6 +243,18 @@ class ThemePreferencesRepository(private val context: Context) {
     suspend fun setFontScale(scale: ReadingFontScale) {
         context.themeDataStore.edit { prefs ->
             prefs[fontScaleKey] = scale.key
+        }
+    }
+
+    suspend fun setApplyFontToWholeUi(enabled: Boolean) {
+        context.themeDataStore.edit { prefs ->
+            prefs[applyFontToWholeUiKey] = enabled
+        }
+    }
+
+    suspend fun setFocusReadingMode(enabled: Boolean) {
+        context.themeDataStore.edit { prefs ->
+            prefs[focusReadingModeKey] = enabled
         }
     }
 
