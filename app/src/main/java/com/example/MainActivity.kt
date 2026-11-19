@@ -41,6 +41,7 @@ import com.example.core.configureAppCheck
 import com.example.core.describeActiveSoundscape
 import com.example.core.diagnoseAppCheckFailure
 import com.example.core.getLocalAppCheckDebugToken
+import com.example.data.repository.CampaignExtendedStore
 import com.example.data.repository.CampaignRepository
 import com.example.data.repository.GameMasterAiRepository
 import com.example.data.repository.PaperThemeMode
@@ -284,7 +285,11 @@ private fun AuthenticatedNavHost(
                         val app = checkNotNull(this[APPLICATION_KEY])
                         val db = FirestoreClientProvider.getDatabase(app)
                         CampaignsViewModel(
-                            repository = CampaignRepository(db, Firebase.auth),
+                            repository = CampaignRepository(
+                                db = db,
+                                auth = Firebase.auth,
+                                extendedStore = CampaignExtendedStore.getInstance(app)
+                            ),
                             currentUserId = currentUserId
                         )
                     }
@@ -337,7 +342,11 @@ private fun AuthenticatedNavHost(
                         val app = checkNotNull(this[APPLICATION_KEY])
                         val db = FirestoreClientProvider.getDatabase(app)
                         SetupWizardViewModel(
-                            campaignRepository = CampaignRepository(db, Firebase.auth),
+                            campaignRepository = CampaignRepository(
+                                db = db,
+                                auth = Firebase.auth,
+                                extendedStore = CampaignExtendedStore.getInstance(app)
+                            ),
                             aiRepository = aiRepository,
                             themePreferencesRepository = themeRepo
                         )
@@ -372,7 +381,11 @@ private fun AuthenticatedNavHost(
                         val app = checkNotNull(this[APPLICATION_KEY])
                         val db = FirestoreClientProvider.getDatabase(app)
                         GameSessionViewModel(
-                            campaignRepository = CampaignRepository(db, Firebase.auth),
+                            campaignRepository = CampaignRepository(
+                                db = db,
+                                auth = Firebase.auth,
+                                extendedStore = CampaignExtendedStore.getInstance(app)
+                            ),
                             aiRepository = aiRepository,
                             factsRepository = factsRepository,
                             themePreferencesRepository = themeRepo,

@@ -1,5 +1,7 @@
 package com.example.ui
 
+import android.content.Context
+import androidx.test.core.app.ApplicationProvider
 import com.example.core.ChronicleExporter
 import com.example.core.RpgAudioEngine
 import com.example.core.ScenarioCodeCodec
@@ -20,6 +22,9 @@ import com.example.data.model.RiskyChoiceResolver
 import com.example.data.model.SessionSetupInput
 import com.example.data.model.SkillType
 import com.example.data.model.TurnChoice
+import com.example.data.model.TurnStateSnapshot
+import com.example.data.repository.CampaignExtendedStore
+import com.example.data.repository.CampaignRepository
 import com.example.data.repository.GameMasterAiRepository
 import com.example.data.repository.NarrativePace
 import com.example.data.repository.UserAppSettings
@@ -378,6 +383,142 @@ class AudioAndRiskyChoicesTest {
         assertTrue(html.contains("Оглавление"))
         assertTrue(html.contains("Глава 2"))
         assertTrue(html.contains("Спасён торговец"))
+    }
+
+    @Test
+    fun legacyFirestorePayloadFilterStripsNewFieldsCleanly() {
+        val fullCampaignUpdate: Map<String, Any> = mapOf(
+            "turnCount" to 4L,
+            "hudLocation" to "Аудитория",
+            "hudTime" to "Утро",
+            "hudStatusAndInventory" to "Здоровье: 90%",
+            "hudRelationsAndCanon" to "Канон 5%",
+            "canonDeviationPercent" to 5L,
+            "healthPercent" to 90L,
+            "currencyAmount" to 400L,
+            "currencyLabel" to "руб.",
+            "skills" to mapOf("might" to 5L, "stealth" to 5L, "insight" to 6L, "lore" to 7L),
+            "inventory" to listOf("Смартфон"),
+            "inventoryItems" to listOf(mapOf("name" to "Смартфон")),
+            "activeQuests" to listOf("Сдать зачёт"),
+            "quests" to listOf(mapOf("title" to "Сдать зачёт")),
+            "chapterSummaries" to listOf("Глава 1"),
+            "playerName" to "Алиса",
+            "playerGender" to "female",
+            "storySummary" to "Утренняя лекция."
+        )
+
+        val legacyWithQuests = CampaignRepository.filterLegacyCampaignPayload(
+            fullCampaignUpdate,
+            includeActiveQuests = true
+        )
+        assertTrue("turnCount" in legacyWithQuests)
+        assertTrue("activeQuests" in legacyWithQuests)
+        assertFalse("healthPercent" in legacyWithQuests)
+        assertFalse("currencyAmount" in legacyWithQuests)
+        assertFalse("skills" in legacyWithQuests)
+        assertFalse("inventoryItems" in legacyWithQuests)
+        assertFalse("quests" in legacyWithQuests)
+        assertFalse("chapterSummaries" in legacyWithQuests)
+        assertFalse("playerName" in legacyWithQuests)
+        assertFalse("playerGender" in legacyWithQuests)
+
+        val minimalLegacy = CampaignRepository.filterLegacyCampaignPayload(
+            fullCampaignUpdate,
+            includeActiveQuests = false
+        )
+        assertFalse("activeQuests" in minimalLegacy)
+        assertTrue("storySummary" in minimalLegacy)
+
+        val fullTurn: Map<String, Any> = mapOf(
+            "userId" to "u1",
+            "campaignId" to "c1",
+            "turnNumber" to 4L,
+            "playerAction" to "Задать вопрос",
+            "narrative" to "Преподаватель кивает.",
+            "hudLine" to "[Аудитория | Утро | Норма | Канон]",
+            "activeNpc" to mapOf("hasActiveNpc" to false),
+            "choices" to emptyList<Any>(),
+            "stateSnapshot" to mapOf("healthPercent" to 90L)
+        )
+        val legacyTurn = CampaignRepository.filterLegacyTurnPayload(fullTurn)
+        assertTrue("narrative" in legacyTurn)
+        assertFalse("stateSnapshot" in legacyTurn)
+    }
+
+    @Test
+    fun campaignExtendedStorePersistsAndMergesIntoLegacyDocuments() {
+        val context = ApplicationProvider.getApplicationContext<Context>()
+        val store = CampaignExtendedStore(context)
+        val cid = "camp_legacy_test"
+        store.deleteCampaign(cid)
+
+        val item = InventoryItem(
+            id = "phone",
+            name = "Смартфон",
+            category = ItemCategory.GEAR.key,
+            quantity = 1L,
+            isEquipped = true,
+            description = "Заряд 62%"
+        )
+        val quest = QuestEntry(
+            id = "q_lec",
+            title = "Понять тему лекции",
+            status = QuestStatus.ACTIVE.key,
+            updatedAtTurn = 3L
+        )
+        val snap = TurnStateSnapshot(
+            hudLocation = "Аудитория 304",
+            healthPercent = 82L,
+            currencyAmount = 400L,
+            currencyLabel = "руб.",
+            inventoryItems = listOf(item),
+            quests = listOf(quest),
+            stateChangeSummary = "Записала конспект"
+        )
+
+        store.saveCampaignState(
+            campaignId = cid,
+            playerName = "Алиса",
+            playerGender = PlayerGender.FEMALE.key,
+            healthPercent = 82L,
+            currencyAmount = 400L,
+            currencyLabel = "руб.",
+            skills = HeroSkills(might = 3L, stealth = 5L, insight = 8L, lore = 7L),
+            inventoryItems = listOf(item),
+            quests = listOf(quest),
+            chapterSummaries = listOf("Ходы 1–10: первое утро в университете."),
+            turnSnapshot = 3L to snap
+        )
+
+        // Legacy Firestore doc has none of the Stage 1-4 fields
+        val legacyDoc = Campaign(
+            id = cid,
+            title = "Утро в кампусе",
+            universe = "Повседневность",
+            inventory = listOf("Смартфон")
+        )
+        val merged = store.mergeInto(legacyDoc)
+        assertEquals("Алиса", merged.playerName)
+        assertEquals(PlayerGender.FEMALE.key, merged.playerGender)
+        assertEquals(82L, merged.healthPercent)
+        assertEquals(400L, merged.currencyAmount)
+        assertEquals("руб.", merged.currencyLabel)
+        assertEquals(8L, merged.skills.insight)
+        assertEquals(1, merged.inventoryItems.size)
+        assertTrue(merged.inventoryItems.first().isEquipped)
+        assertEquals(1, merged.quests.size)
+        assertEquals(1, merged.chapterSummaries.size)
+
+        val mergedTurns = store.mergeInto(
+            cid,
+            listOf(CampaignTurn(id = "t3", turnNumber = 3L, narrative = "Лекция идёт."))
+        )
+        assertNotNull(mergedTurns.first().stateSnapshot)
+        assertEquals(82L, mergedTurns.first().stateSnapshot!!.healthPercent)
+
+        store.deleteCampaign(cid)
+        assertNull(store.read(cid))
     }
 }
 

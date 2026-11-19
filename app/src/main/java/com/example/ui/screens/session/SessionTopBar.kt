@@ -3,9 +3,7 @@ package com.example.ui.screens.session
 import androidx.compose.foundation.layout.Column
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
-import androidx.compose.material.icons.automirrored.outlined.MenuBook
 import androidx.compose.material.icons.automirrored.outlined.Undo
-import androidx.compose.material.icons.outlined.Analytics
 import androidx.compose.material.icons.outlined.EditNote
 import androidx.compose.material.icons.outlined.Settings
 import androidx.compose.material3.ExperimentalMaterial3Api
@@ -38,12 +36,9 @@ internal fun SessionTopBar(
     soundEnabled: Boolean,
     topBarContainerColor: Color,
     accentPrimary: Color,
-    accentSecondary: Color,
     onBackClick: () -> Unit,
     onRollbackClick: () -> Unit,
-    onStatsClick: () -> Unit,
     onFactsClick: () -> Unit,
-    onCodexClick: () -> Unit,
     onToggleSound: () -> Unit,
     onOpenSettings: () -> Unit
 ) {
@@ -111,22 +106,6 @@ internal fun SessionTopBar(
                     }
                 }
                 IconButton(
-                    onClick = onStatsClick,
-                    modifier = Modifier
-                        .minimumInteractiveComponentSize()
-                        .testTag("open_stats_button")
-                ) {
-                    Icon(
-                        imageVector = Icons.Outlined.Analytics,
-                        contentDescription = "Статистика и инвентарь (свайп вправо)",
-                        tint = if (currentPage == 0) {
-                            accentSecondary
-                        } else {
-                            MaterialTheme.colorScheme.onBackground
-                        }
-                    )
-                }
-                IconButton(
                     onClick = onFactsClick,
                     modifier = Modifier
                         .minimumInteractiveComponentSize()
@@ -138,22 +117,6 @@ internal fun SessionTopBar(
                         tint = if (currentPage == 2 && codexTab == 3) {
                             accentPrimary
                         } else if (pinnedFactsCount > 0) {
-                            accentPrimary
-                        } else {
-                            MaterialTheme.colorScheme.onBackground
-                        }
-                    )
-                }
-                IconButton(
-                    onClick = onCodexClick,
-                    modifier = Modifier
-                        .minimumInteractiveComponentSize()
-                        .testTag("open_codex_button")
-                ) {
-                    Icon(
-                        imageVector = Icons.AutoMirrored.Outlined.MenuBook,
-                        contentDescription = "Кодекс хроники (свайп влево)",
-                        tint = if (currentPage == 2) {
                             accentPrimary
                         } else {
                             MaterialTheme.colorScheme.onBackground

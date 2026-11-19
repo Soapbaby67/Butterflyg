@@ -337,7 +337,6 @@ fun GameSessionScreen(
                     soundEnabled = soundEnabled,
                     topBarContainerColor = dynamicSpec.topColor.copy(alpha = 0.68f),
                     accentPrimary = dynamicSpec.accentPrimary,
-                    accentSecondary = dynamicSpec.accentSecondary,
                     onBackClick = {
                         if (pagerState.currentPage != 1) {
                             coroutineScope.launch { pagerState.animateScrollToPage(1) }
@@ -351,25 +350,10 @@ fun GameSessionScreen(
                         audio?.playSfx(SfxEvent.UI_TAP)
                         showRollbackConfirm = true
                     },
-                    onStatsClick = {
-                        haptics.tap()
-                        coroutineScope.launch {
-                            pagerState.animateScrollToPage(if (pagerState.currentPage == 0) 1 else 0)
-                        }
-                    },
                     onFactsClick = {
                         haptics.tap()
                         codexTab = 3
                         coroutineScope.launch { pagerState.animateScrollToPage(2) }
-                    },
-                    onCodexClick = {
-                        haptics.tap()
-                        if (pagerState.currentPage == 2) {
-                            coroutineScope.launch { pagerState.animateScrollToPage(1) }
-                        } else {
-                            codexTab = 0
-                            coroutineScope.launch { pagerState.animateScrollToPage(2) }
-                        }
                     },
                     onToggleSound = {
                         haptics.tap()

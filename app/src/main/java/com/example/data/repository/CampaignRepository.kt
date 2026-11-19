@@ -29,6 +29,7 @@ import com.google.firebase.firestore.snapshots
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.catch
+import kotlinx.coroutines.flow.combine
 import kotlinx.coroutines.flow.emitAll
 import kotlinx.coroutines.flow.flow
 import kotlinx.coroutines.flow.map
@@ -88,11 +89,13 @@ data class GmTurnOutcome(
 
 class CampaignRepository(
     private val db: FirebaseFirestore,
-    private val auth: FirebaseAuth = Firebase.auth
+    private val auth: FirebaseAuth = Firebase.auth,
+    private val extendedStore: CampaignExtendedStore? = null
 ) {
     constructor(context: Context) : this(
         db = FirestoreClientProvider.getDatabase(context),
-        auth = Firebase.auth
+        auth = Firebase.auth,
+        extendedStore = CampaignExtendedStore.getInstance(context)
     )
 
     private fun requireUserId(): String {
@@ -108,81 +111,99 @@ class CampaignRepository(
 
     fun observeCampaigns(userId: String): Flow<List<Campaign>> = flow {
         val path = "users/$userId/campaigns"
-        emitAll(
-            campaignsCollection(userId)
-                .snapshots()
-                .map { snapshot ->
-                    snapshot.toObjects(
-                        Campaign::class.java,
-                        DocumentSnapshot.ServerTimestampBehavior.ESTIMATE
-                    ).sortedByDescending { it.updatedAt ?: it.createdAt ?: Timestamp(0, 0) }
+        val baseFlow = campaignsCollection(userId)
+            .snapshots()
+            .map { snapshot ->
+                snapshot.toObjects(
+                    Campaign::class.java,
+                    DocumentSnapshot.ServerTimestampBehavior.ESTIMATE
+                ).sortedByDescending { it.updatedAt ?: it.createdAt ?: Timestamp(0, 0) }
+            }
+            .catch { error ->
+                val firestoreError = generateSequence(error) { it.cause }
+                    .filterIsInstance<FirebaseFirestoreException>()
+                    .firstOrNull()
+                if (firestoreError == null && error is CancellationException) throw error
+                val exceptionToLog = firestoreError ?: (error as? Exception)
+                if (exceptionToLog != null && auth.currentUser?.uid == userId) {
+                    handleFirestoreError(exceptionToLog, OperationType.LIST, path)
                 }
-                .catch { error ->
-                    val firestoreError = generateSequence(error) { it.cause }
-                        .filterIsInstance<FirebaseFirestoreException>()
-                        .firstOrNull()
-                    if (firestoreError == null && error is CancellationException) throw error
-                    val exceptionToLog = firestoreError ?: (error as? Exception)
-                    if (exceptionToLog != null && auth.currentUser?.uid == userId) {
-                        handleFirestoreError(exceptionToLog, OperationType.LIST, path)
-                    }
-                    throw error
-                }
-        )
+                throw error
+            }
+        val mergedFlow = if (extendedStore != null) {
+            combine(baseFlow, extendedStore.revision) { list, _ ->
+                list.map { extendedStore.mergeInto(it) }
+            }
+        } else {
+            baseFlow
+        }
+        emitAll(mergedFlow)
     }
 
     fun observeCampaign(userId: String, campaignId: String): Flow<Campaign?> = flow {
         val docRef = campaignsCollection(userId).document(campaignId)
-        emitAll(
-            docRef.snapshots()
-                .map { snapshot ->
-                    if (snapshot.exists()) {
-                        snapshot.toObject(
-                            Campaign::class.java,
-                            DocumentSnapshot.ServerTimestampBehavior.ESTIMATE
-                        )
-                    } else {
-                        null
-                    }
+        val baseFlow = docRef.snapshots()
+            .map { snapshot ->
+                if (snapshot.exists()) {
+                    snapshot.toObject(
+                        Campaign::class.java,
+                        DocumentSnapshot.ServerTimestampBehavior.ESTIMATE
+                    )
+                } else {
+                    null
                 }
-                .catch { error ->
-                    val firestoreError = generateSequence(error) { it.cause }
-                        .filterIsInstance<FirebaseFirestoreException>()
-                        .firstOrNull()
-                    if (firestoreError == null && error is CancellationException) throw error
-                    val exceptionToLog = firestoreError ?: (error as? Exception)
-                    if (exceptionToLog != null && auth.currentUser?.uid == userId) {
-                        handleFirestoreError(exceptionToLog, OperationType.GET, docRef.path)
-                    }
-                    throw error
+            }
+            .catch { error ->
+                val firestoreError = generateSequence(error) { it.cause }
+                    .filterIsInstance<FirebaseFirestoreException>()
+                    .firstOrNull()
+                if (firestoreError == null && error is CancellationException) throw error
+                val exceptionToLog = firestoreError ?: (error as? Exception)
+                if (exceptionToLog != null && auth.currentUser?.uid == userId) {
+                    handleFirestoreError(exceptionToLog, OperationType.GET, docRef.path)
                 }
-        )
+                throw error
+            }
+        val mergedFlow = if (extendedStore != null) {
+            combine(baseFlow, extendedStore.revision) { campaign, _ ->
+                campaign?.let { extendedStore.mergeInto(it) }
+            }
+        } else {
+            baseFlow
+        }
+        emitAll(mergedFlow)
     }
 
     fun observeTurns(userId: String, campaignId: String): Flow<List<CampaignTurn>> = flow {
         val path = "users/$userId/campaigns/$campaignId/turns"
-        emitAll(
-            turnsCollection(userId, campaignId)
-                .orderBy("turnNumber", Query.Direction.ASCENDING)
-                .snapshots()
-                .map { snapshot ->
-                    snapshot.toObjects(
-                        CampaignTurn::class.java,
-                        DocumentSnapshot.ServerTimestampBehavior.ESTIMATE
-                    )
+        val baseFlow = turnsCollection(userId, campaignId)
+            .orderBy("turnNumber", Query.Direction.ASCENDING)
+            .snapshots()
+            .map { snapshot ->
+                snapshot.toObjects(
+                    CampaignTurn::class.java,
+                    DocumentSnapshot.ServerTimestampBehavior.ESTIMATE
+                )
+            }
+            .catch { error ->
+                val firestoreError = generateSequence(error) { it.cause }
+                    .filterIsInstance<FirebaseFirestoreException>()
+                    .firstOrNull()
+                if (firestoreError == null && error is CancellationException) throw error
+                val exceptionToLog = firestoreError ?: (error as? Exception)
+                if (exceptionToLog != null && auth.currentUser?.uid == userId) {
+                    handleFirestoreError(exceptionToLog, OperationType.LIST, path)
                 }
-                .catch { error ->
-                    val firestoreError = generateSequence(error) { it.cause }
-                        .filterIsInstance<FirebaseFirestoreException>()
-                        .firstOrNull()
-                    if (firestoreError == null && error is CancellationException) throw error
-                    val exceptionToLog = firestoreError ?: (error as? Exception)
-                    if (exceptionToLog != null && auth.currentUser?.uid == userId) {
-                        handleFirestoreError(exceptionToLog, OperationType.LIST, path)
-                    }
-                    throw error
-                }
-        )
+                throw error
+            }
+        val mergedFlow = if (extendedStore != null) {
+            combine(baseFlow, extendedStore.revision) { turns, _ ->
+                extendedStore.mergeInto(campaignId, turns)
+            }
+        } else {
+            baseFlow
+        }
+        emitAll(mergedFlow)
     }
 
     suspend fun getCampaign(campaignId: String): Campaign? {
@@ -190,10 +211,11 @@ class CampaignRepository(
         val docRef = campaignsCollection(uid).document(campaignId)
         return try {
             val snap = docRef.get().await()
-            snap.toObject(
+            val campaign = snap.toObject(
                 Campaign::class.java,
                 DocumentSnapshot.ServerTimestampBehavior.ESTIMATE
             )
+            campaign?.let { extendedStore?.mergeInto(it) ?: it }
         } catch (e: CancellationException) {
             throw e
         } catch (e: Exception) {
@@ -268,7 +290,7 @@ class CampaignRepository(
             "hudRelationsAndCanon" to openingOutcome.hudRelationsAndCanon.take(300),
             "canonDeviationPercent" to openingOutcome.canonDeviationPercent.coerceIn(0L, 100L),
             "healthPercent" to openingOutcome.healthPercent.coerceIn(0L, 100L),
-            "currencyAmount" to openingOutcome.currencyAmount.coerceAtLeast(0L),
+            "currencyAmount" to openingOutcome.currencyAmount.coerceIn(0L, 100_000_000L),
             "currencyLabel" to openingOutcome.currencyLabel.take(80),
             "skills" to resolvedSkills.toFirestoreMap(),
             "activeNpc" to openingOutcome.activeNpc.toFirestoreMap(),
@@ -289,7 +311,7 @@ class CampaignRepository(
             "campaignId" to campaignId,
             "turnNumber" to 1L,
             "playerAction" to "Начало хроники",
-            "narrative" to openingOutcome.narrative.take(12000),
+            "narrative" to openingOutcome.narrative.ifBlank { "История начинается." }.take(12000),
             "hudLine" to openingOutcome.hudLine.take(600),
             "activeNpc" to openingOutcome.activeNpc.toFirestoreMap(),
             "choices" to openingOutcome.choices.take(6).map { it.toFirestoreMap() },
@@ -298,10 +320,39 @@ class CampaignRepository(
         )
 
         return try {
-            db.runBatch { batch ->
-                batch.set(campaignRef, campaignPayload)
-                batch.set(turnRef, turnPayload)
-            }.await()
+            runWithLegacyFallback(
+                primary = {
+                    db.runBatch { batch ->
+                        batch.set(campaignRef, campaignPayload)
+                        batch.set(turnRef, turnPayload)
+                    }.await()
+                },
+                legacy = {
+                    db.runBatch { batch ->
+                        batch.set(campaignRef, filterLegacyCampaignPayload(campaignPayload, includeActiveQuests = true))
+                        batch.set(turnRef, filterLegacyTurnPayload(turnPayload))
+                    }.await()
+                },
+                minimalLegacy = {
+                    db.runBatch { batch ->
+                        batch.set(campaignRef, filterLegacyCampaignPayload(campaignPayload, includeActiveQuests = false))
+                        batch.set(turnRef, filterLegacyTurnPayload(turnPayload))
+                    }.await()
+                }
+            )
+            extendedStore?.saveCampaignState(
+                campaignId = campaignId,
+                playerName = setup.playerName.trim().take(80),
+                playerGender = setup.playerGender.key,
+                healthPercent = openingOutcome.healthPercent.coerceIn(0L, 100L),
+                currencyAmount = openingOutcome.currencyAmount.coerceIn(0L, 100_000_000L),
+                currencyLabel = openingOutcome.currencyLabel.take(80),
+                skills = resolvedSkills,
+                inventoryItems = structuredItems,
+                quests = structuredQuests,
+                chapterSummaries = emptyList(),
+                turnSnapshot = 1L to snapshot
+            )
             campaignId
         } catch (e: CancellationException) {
             throw e
@@ -390,7 +441,7 @@ class CampaignRepository(
             "hudRelationsAndCanon" to outcome.hudRelationsAndCanon.take(300),
             "canonDeviationPercent" to outcome.canonDeviationPercent.coerceIn(0L, 100L),
             "healthPercent" to outcome.healthPercent.coerceIn(0L, 100L),
-            "currencyAmount" to outcome.currencyAmount.coerceAtLeast(0L),
+            "currencyAmount" to outcome.currencyAmount.coerceIn(0L, 100_000_000L),
             "currencyLabel" to outcome.currencyLabel.take(80),
             "skills" to updatedSkills.toFirestoreMap(),
             "activeNpc" to outcome.activeNpc.toFirestoreMap(),
@@ -410,7 +461,7 @@ class CampaignRepository(
             "campaignId" to campaign.id,
             "turnNumber" to nextTurnNumber,
             "playerAction" to playerAction.trim().take(1200),
-            "narrative" to outcome.narrative.take(12000),
+            "narrative" to outcome.narrative.ifBlank { "Сцена продолжается." }.take(12000),
             "hudLine" to outcome.hudLine.take(600),
             "activeNpc" to outcome.activeNpc.toFirestoreMap(),
             "choices" to outcome.choices.take(6).map { it.toFirestoreMap() },
@@ -419,10 +470,37 @@ class CampaignRepository(
         )
 
         try {
-            db.runBatch { batch ->
-                batch.update(campaignRef, campaignUpdate)
-                batch.set(turnRef, turnPayload)
-            }.await()
+            runWithLegacyFallback(
+                primary = {
+                    db.runBatch { batch ->
+                        batch.update(campaignRef, campaignUpdate)
+                        batch.set(turnRef, turnPayload)
+                    }.await()
+                },
+                legacy = {
+                    db.runBatch { batch ->
+                        batch.update(campaignRef, filterLegacyCampaignPayload(campaignUpdate, includeActiveQuests = true))
+                        batch.set(turnRef, filterLegacyTurnPayload(turnPayload))
+                    }.await()
+                },
+                minimalLegacy = {
+                    db.runBatch { batch ->
+                        batch.update(campaignRef, filterLegacyCampaignPayload(campaignUpdate, includeActiveQuests = false))
+                        batch.set(turnRef, filterLegacyTurnPayload(turnPayload))
+                    }.await()
+                }
+            )
+            extendedStore?.saveCampaignState(
+                campaignId = campaign.id,
+                healthPercent = outcome.healthPercent.coerceIn(0L, 100L),
+                currencyAmount = outcome.currencyAmount.coerceIn(0L, 100_000_000L),
+                currencyLabel = outcome.currencyLabel.take(80),
+                skills = updatedSkills,
+                inventoryItems = structuredItems,
+                quests = mergedQuests,
+                chapterSummaries = updatedChapters,
+                turnSnapshot = nextTurnNumber to snapshot
+            )
         } catch (e: CancellationException) {
             throw e
         } catch (e: Exception) {
@@ -443,10 +521,11 @@ class CampaignRepository(
 
         return try {
             val campaignSnap = campaignRef.get().await()
-            val campaign = campaignSnap.toObject(
+            val rawCampaign = campaignSnap.toObject(
                 Campaign::class.java,
                 DocumentSnapshot.ServerTimestampBehavior.ESTIMATE
             ) ?: throw IllegalStateException("Кампания не найдена.")
+            val campaign = extendedStore?.mergeInto(rawCampaign) ?: rawCampaign
 
             val turnsSnap = turnsRef.orderBy("turnNumber", Query.Direction.ASCENDING).get().await()
             val docs = turnsSnap.documents
@@ -457,15 +536,46 @@ class CampaignRepository(
             val lastDoc = docs.last()
             val previousDoc = docs[docs.size - 2]
             val lastTurn = lastDoc.toObject(CampaignTurn::class.java)
-            val prevTurn = previousDoc.toObject(CampaignTurn::class.java)
+            val rawPrevTurn = previousDoc.toObject(CampaignTurn::class.java)
                 ?: throw IllegalStateException("Не удалось прочитать предыдущий ход для отката.")
+            val prevTurn = extendedStore?.mergeInto(campaignId, listOf(rawPrevTurn))?.firstOrNull()
+                ?: rawPrevTurn
 
             val restoreUpdate = buildCampaignRestoreMap(campaign, prevTurn)
 
-            db.runBatch { batch ->
-                batch.delete(lastDoc.reference)
-                batch.update(campaignRef, restoreUpdate)
-            }.await()
+            runWithLegacyFallback(
+                primary = {
+                    db.runBatch { batch ->
+                        batch.delete(lastDoc.reference)
+                        batch.update(campaignRef, restoreUpdate)
+                    }.await()
+                },
+                legacy = {
+                    db.runBatch { batch ->
+                        batch.delete(lastDoc.reference)
+                        batch.update(campaignRef, filterLegacyCampaignPayload(restoreUpdate, includeActiveQuests = true))
+                    }.await()
+                },
+                minimalLegacy = {
+                    db.runBatch { batch ->
+                        batch.delete(lastDoc.reference)
+                        batch.update(campaignRef, filterLegacyCampaignPayload(restoreUpdate, includeActiveQuests = false))
+                    }.await()
+                }
+            )
+
+            val snap = prevTurn.stateSnapshot
+            extendedStore?.saveCampaignState(
+                campaignId = campaignId,
+                healthPercent = snap?.healthPercent ?: campaign.healthPercent,
+                currencyAmount = snap?.currencyAmount ?: campaign.currencyAmount,
+                currencyLabel = snap?.currencyLabel ?: campaign.currencyLabel,
+                skills = snap?.skills ?: campaign.skills,
+                inventoryItems = snap?.inventoryItems ?: campaign.resolvedInventoryItems(),
+                quests = snap?.quests ?: campaign.resolvedQuests(),
+                chapterSummaries = snap?.chapterSummaries ?: campaign.chapterSummaries,
+                pruneSnapshotsAfterTurn = prevTurn.turnNumber
+            )
 
             lastTurn?.playerAction?.takeIf { it.isNotBlank() && it != "Начало хроники" }
         } catch (e: CancellationException) {
@@ -490,22 +600,24 @@ class CampaignRepository(
         val sourceCampaignRef = campaignsCollection(uid).document(sourceCampaignId)
 
         return try {
-            val sourceCampaign = sourceCampaignRef.get().await().toObject(
+            val rawSource = sourceCampaignRef.get().await().toObject(
                 Campaign::class.java,
                 DocumentSnapshot.ServerTimestampBehavior.ESTIMATE
             ) ?: throw IllegalStateException("Исходная хроника не найдена.")
+            val sourceCampaign = extendedStore?.mergeInto(rawSource) ?: rawSource
 
             val turnsSnap = turnsCollection(uid, sourceCampaignId)
                 .orderBy("turnNumber", Query.Direction.ASCENDING)
                 .get()
                 .await()
 
-            val turnsToCopy = turnsSnap.documents
+            val allSourceTurns = turnsSnap.documents
                 .mapNotNull { it.toObject(CampaignTurn::class.java) }
+                .let { list -> extendedStore?.mergeInto(sourceCampaignId, list) ?: list }
+
+            val turnsToCopy = allSourceTurns
                 .filter { it.turnNumber <= upToTurnNumber }
-                .ifEmpty {
-                    turnsSnap.documents.mapNotNull { it.toObject(CampaignTurn::class.java) }.take(1)
-                }
+                .ifEmpty { allSourceTurns.take(1) }
 
             val targetTurn = turnsToCopy.lastOrNull()
                 ?: throw IllegalStateException("В хронике нет ходов для создания ветки.")
@@ -544,7 +656,7 @@ class CampaignRepository(
                 "hudRelationsAndCanon" to (snap?.hudRelationsAndCanon ?: fallbackRel).take(300),
                 "canonDeviationPercent" to (snap?.canonDeviationPercent ?: sourceCampaign.canonDeviationPercent).coerceIn(0L, 100L),
                 "healthPercent" to (snap?.healthPercent ?: sourceCampaign.healthPercent.coerceIn(-1L, 100L)),
-                "currencyAmount" to (snap?.currencyAmount ?: sourceCampaign.currencyAmount).coerceAtLeast(0L),
+                "currencyAmount" to (snap?.currencyAmount ?: sourceCampaign.currencyAmount).coerceIn(0L, 100_000_000L),
                 "currencyLabel" to (snap?.currencyLabel ?: sourceCampaign.currencyLabel).take(80),
                 "skills" to (snap?.skills ?: sourceCampaign.skills).toFirestoreMap(),
                 "activeNpc" to targetTurn.activeNpc.toFirestoreMap(),
@@ -562,23 +674,66 @@ class CampaignRepository(
 
             // Write campaign + first batch of turns atomically, then remaining turns in chunks
             val firstBatchTurns = turnsToCopy.take(350)
-            db.runBatch { batch ->
-                batch.set(newCampaignRef, newCampaignPayload)
-                firstBatchTurns.forEach { turn ->
-                    val newTurnRef = turnsCollection(uid, newCampaignId).document()
-                    batch.set(newTurnRef, buildTurnPayloadForClone(uid, newCampaignId, turn))
+            var useLegacyTurnClone = false
+            runWithLegacyFallback(
+                primary = {
+                    db.runBatch { batch ->
+                        batch.set(newCampaignRef, newCampaignPayload)
+                        firstBatchTurns.forEach { turn ->
+                            val newTurnRef = turnsCollection(uid, newCampaignId).document()
+                            batch.set(newTurnRef, buildTurnPayloadForClone(uid, newCampaignId, turn))
+                        }
+                    }.await()
+                },
+                legacy = {
+                    useLegacyTurnClone = true
+                    db.runBatch { batch ->
+                        batch.set(newCampaignRef, filterLegacyCampaignPayload(newCampaignPayload, includeActiveQuests = true))
+                        firstBatchTurns.forEach { turn ->
+                            val newTurnRef = turnsCollection(uid, newCampaignId).document()
+                            batch.set(newTurnRef, filterLegacyTurnPayload(buildTurnPayloadForClone(uid, newCampaignId, turn)))
+                        }
+                    }.await()
+                },
+                minimalLegacy = {
+                    useLegacyTurnClone = true
+                    db.runBatch { batch ->
+                        batch.set(newCampaignRef, filterLegacyCampaignPayload(newCampaignPayload, includeActiveQuests = false))
+                        firstBatchTurns.forEach { turn ->
+                            val newTurnRef = turnsCollection(uid, newCampaignId).document()
+                            batch.set(newTurnRef, filterLegacyTurnPayload(buildTurnPayloadForClone(uid, newCampaignId, turn)))
+                        }
+                    }.await()
                 }
-            }.await()
+            )
 
             if (turnsToCopy.size > 350) {
                 for (chunk in turnsToCopy.drop(350).chunked(350)) {
                     db.runBatch { batch ->
                         chunk.forEach { turn ->
                             val newTurnRef = turnsCollection(uid, newCampaignId).document()
-                            batch.set(newTurnRef, buildTurnPayloadForClone(uid, newCampaignId, turn))
+                            val payload = buildTurnPayloadForClone(uid, newCampaignId, turn)
+                            batch.set(newTurnRef, if (useLegacyTurnClone) filterLegacyTurnPayload(payload) else payload)
                         }
                     }.await()
                 }
+            }
+
+            extendedStore?.saveCampaignState(
+                campaignId = newCampaignId,
+                playerName = sourceCampaign.playerName.take(80),
+                playerGender = sourceCampaign.resolvedGender().key,
+                healthPercent = snap?.healthPercent ?: sourceCampaign.healthPercent.coerceIn(-1L, 100L),
+                currencyAmount = (snap?.currencyAmount ?: sourceCampaign.currencyAmount).coerceIn(0L, 100_000_000L),
+                currencyLabel = (snap?.currencyLabel ?: sourceCampaign.currencyLabel).take(80),
+                skills = snap?.skills ?: sourceCampaign.skills,
+                inventoryItems = restoredInventoryItems.take(60),
+                quests = restoredQuests.take(30),
+                chapterSummaries = (snap?.chapterSummaries ?: sourceCampaign.chapterSummaries).take(40)
+            )
+            val clonedSnapshots = turnsToCopy.mapNotNull { t -> t.stateSnapshot?.let { t.turnNumber to it } }.toMap()
+            if (clonedSnapshots.isNotEmpty()) {
+                extendedStore?.saveSnapshots(newCampaignId, clonedSnapshots)
             }
 
             newCampaignId
@@ -591,7 +746,7 @@ class CampaignRepository(
     }
 
     /**
-     * Equips or unequips a structured inventory item directly in Firestore without spending a game turn.
+     * Equips or unequips a structured inventory item directly without spending a game turn.
      */
     suspend fun toggleItemEquipped(
         campaign: Campaign,
@@ -610,14 +765,27 @@ class CampaignRepository(
             }
         }
         val campaignRef = campaignsCollection(uid).document(campaign.id)
+        val fullUpdate = mapOf(
+            "inventoryItems" to updatedItems.take(60).map { it.toFirestoreMap() },
+            "inventory" to updatedItems.take(60).map { it.name.take(120) },
+            "updatedAt" to FieldValue.serverTimestamp()
+        )
         try {
-            campaignRef.update(
-                mapOf(
-                    "inventoryItems" to updatedItems.take(60).map { it.toFirestoreMap() },
-                    "inventory" to updatedItems.take(60).map { it.name.take(120) },
-                    "updatedAt" to FieldValue.serverTimestamp()
-                )
-            ).await()
+            runWithLegacyFallback(
+                primary = { campaignRef.update(fullUpdate).await() },
+                legacy = {
+                    campaignRef.update(
+                        mapOf(
+                            "inventory" to updatedItems.take(60).map { it.name.take(120) },
+                            "updatedAt" to FieldValue.serverTimestamp()
+                        )
+                    ).await()
+                }
+            )
+            extendedStore?.saveCampaignState(
+                campaignId = campaign.id,
+                inventoryItems = updatedItems.take(60)
+            )
             return updatedItems
         } catch (e: CancellationException) {
             throw e
@@ -641,6 +809,7 @@ class CampaignRepository(
                 }.await()
             }
             campaignRef.delete().await()
+            extendedStore?.deleteCampaign(campaignId)
         } catch (e: CancellationException) {
             throw e
         } catch (e: Exception) {
@@ -693,7 +862,7 @@ class CampaignRepository(
             "hudRelationsAndCanon" to (snap?.hudRelationsAndCanon ?: fallbackRel).take(300),
             "canonDeviationPercent" to (snap?.canonDeviationPercent ?: campaign.canonDeviationPercent).coerceIn(0L, 100L),
             "healthPercent" to (snap?.healthPercent ?: campaign.healthPercent.coerceIn(-1L, 100L)),
-            "currencyAmount" to (snap?.currencyAmount ?: campaign.currencyAmount).coerceAtLeast(0L),
+            "currencyAmount" to (snap?.currencyAmount ?: campaign.currencyAmount).coerceIn(0L, 100_000_000L),
             "currencyLabel" to (snap?.currencyLabel ?: campaign.currencyLabel).take(80),
             "skills" to (snap?.skills ?: campaign.skills).toFirestoreMap(),
             "activeNpc" to prevTurn.activeNpc.toFirestoreMap(),
@@ -769,5 +938,83 @@ class CampaignRepository(
             )
         }
         return map.values.toList()
+    }
+
+    private suspend fun <T> runWithLegacyFallback(
+        primary: suspend () -> T,
+        legacy: suspend () -> T,
+        minimalLegacy: (suspend () -> T)? = null
+    ): T {
+        return try {
+            primary()
+        } catch (e: CancellationException) {
+            throw e
+        } catch (e: Exception) {
+            if (!isPermissionDenied(e)) throw e
+            try {
+                legacy()
+            } catch (e2: CancellationException) {
+                throw e2
+            } catch (e2: Exception) {
+                if (!isPermissionDenied(e2) || minimalLegacy == null) throw e2
+                minimalLegacy()
+            }
+        }
+    }
+
+    private fun isPermissionDenied(error: Throwable): Boolean {
+        val fsError = generateSequence(error) { it.cause }
+            .filterIsInstance<FirebaseFirestoreException>()
+            .firstOrNull()
+        if (fsError?.code == FirebaseFirestoreException.Code.PERMISSION_DENIED) return true
+        return error.message?.contains("PERMISSION_DENIED", ignoreCase = true) == true
+    }
+
+    companion object {
+        private val LEGACY_CAMPAIGN_KEYS = setOf(
+            "userId",
+            "title",
+            "universe",
+            "characterSummary",
+            "startingPoint",
+            "toneAndDifficulty",
+            "turnCount",
+            "hudLocation",
+            "hudTime",
+            "hudStatusAndInventory",
+            "hudRelationsAndCanon",
+            "canonDeviationPercent",
+            "activeNpc",
+            "inventory",
+            "npcs",
+            "butterflyEvents",
+            "activeQuests",
+            "storySummary",
+            "createdAt",
+            "updatedAt"
+        )
+
+        private val LEGACY_TURN_KEYS = setOf(
+            "userId",
+            "campaignId",
+            "turnNumber",
+            "playerAction",
+            "narrative",
+            "hudLine",
+            "activeNpc",
+            "choices",
+            "createdAt"
+        )
+
+        internal fun filterLegacyCampaignPayload(
+            payload: Map<String, Any>,
+            includeActiveQuests: Boolean = true
+        ): Map<String, Any> = payload.filterKeys { key ->
+            key in LEGACY_CAMPAIGN_KEYS && (includeActiveQuests || key != "activeQuests")
+        }
+
+        internal fun filterLegacyTurnPayload(
+            payload: Map<String, Any>
+        ): Map<String, Any> = payload.filterKeys { key -> key in LEGACY_TURN_KEYS }
     }
 }
