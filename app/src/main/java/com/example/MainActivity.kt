@@ -34,6 +34,7 @@ import androidx.navigation.navArgument
 import com.example.auth.attemptAutoSignIn
 import com.example.auth.findActivity
 import com.example.auth.signOutUser
+import com.example.core.FirestoreClientProvider
 import com.example.core.LocalRpgAudioEngine
 import com.example.core.RpgAudioEngine
 import com.example.core.configureAppCheck
@@ -61,7 +62,6 @@ import com.example.ui.viewmodel.SetupWizardViewModel
 import com.google.firebase.Firebase
 import com.google.firebase.auth.FirebaseAuth
 import com.google.firebase.auth.auth
-import com.google.firebase.firestore.FirebaseFirestore
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.launch
 
@@ -282,8 +282,7 @@ private fun AuthenticatedNavHost(
                 factory = viewModelFactory {
                     initializer {
                         val app = checkNotNull(this[APPLICATION_KEY])
-                        val databaseId = app.getString(R.string.firestore_database_id)
-                        val db = FirebaseFirestore.getInstance(databaseId)
+                        val db = FirestoreClientProvider.getDatabase(app)
                         CampaignsViewModel(
                             repository = CampaignRepository(db, Firebase.auth),
                             currentUserId = currentUserId
@@ -336,8 +335,7 @@ private fun AuthenticatedNavHost(
                 factory = viewModelFactory {
                     initializer {
                         val app = checkNotNull(this[APPLICATION_KEY])
-                        val databaseId = app.getString(R.string.firestore_database_id)
-                        val db = FirebaseFirestore.getInstance(databaseId)
+                        val db = FirestoreClientProvider.getDatabase(app)
                         SetupWizardViewModel(
                             campaignRepository = CampaignRepository(db, Firebase.auth),
                             aiRepository = aiRepository,
@@ -372,8 +370,7 @@ private fun AuthenticatedNavHost(
                 factory = viewModelFactory {
                     initializer {
                         val app = checkNotNull(this[APPLICATION_KEY])
-                        val databaseId = app.getString(R.string.firestore_database_id)
-                        val db = FirebaseFirestore.getInstance(databaseId)
+                        val db = FirestoreClientProvider.getDatabase(app)
                         GameSessionViewModel(
                             campaignRepository = CampaignRepository(db, Firebase.auth),
                             aiRepository = aiRepository,
@@ -389,9 +386,13 @@ private fun AuthenticatedNavHost(
                 viewModel = sessionVm,
                 hapticsEnabled = appSettings.hapticsEnabled,
                 soundEnabled = appSettings.soundEnabled,
+                autoReadTtsEnabled = appSettings.autoReadTtsEnabled,
                 onToggleSound = onToggleSound,
                 onDynamicContextChange = onDynamicContextChange,
                 onOpenSettings = { showSettingsSheet = true },
+                onOpenForkedCampaign = { forkedId ->
+                    navController.navigate("game/$forkedId")
+                },
                 onBack = { navController.popBackStack() }
             )
         }
@@ -419,8 +420,14 @@ private fun AuthenticatedNavHost(
             onSelectAiModel = { model ->
                 coroutineScope.launch { themeRepo.setAiModel(model) }
             },
+            onSelectNarrativePace = { pace ->
+                coroutineScope.launch { themeRepo.setNarrativePace(pace) }
+            },
             onToggleLiveStreaming = { enabled ->
                 coroutineScope.launch { themeRepo.setLiveStreamingEnabled(enabled) }
+            },
+            onToggleAutoReadTts = { enabled ->
+                coroutineScope.launch { themeRepo.setAutoReadTtsEnabled(enabled) }
             },
             onToggleHaptics = { enabled ->
                 coroutineScope.launch { themeRepo.setHapticsEnabled(enabled) }

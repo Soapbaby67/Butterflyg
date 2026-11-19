@@ -51,7 +51,8 @@ private data class MusicalScaleProfile(
     val chordSemitones: List<List<Int>>,
     val melodyOffsets: List<Int>,
     val beatSeconds: Double,
-    val padWarmth: Double
+    val padWarmth: Double,
+    val supportsBreathingPauses: Boolean = true
 )
 
 fun describeActiveSoundscape(context: DynamicThemeContext): String {
@@ -88,9 +89,9 @@ fun describeActiveSoundscape(context: DynamicThemeContext): String {
 
 /**
  * Zero-dependency, offline procedural sound engine rendering three synchronized layers:
- * 1. Dynamic OST (chords + melody adapting to screen, universe, and NPC emotion)
+ * 1. Dynamic OST (multi-phrase progressions + breathing pauses adapting to screen, universe, and NPC emotion)
  * 2. Environmental Ambient (rain droplets, distant thunder, hearth crackle, neon hum, wind)
- * 3. Instant UI, Scene, Emotion & Fate Roulette SFX
+ * 3. Instant UI, Scene, Emotion & Fate Roulette SFX + automatic TTS audio ducking (25% OST while speaking)
  */
 class RpgAudioEngine {
     @Volatile
@@ -101,6 +102,9 @@ class RpgAudioEngine {
 
     @Volatile
     private var sfxVolume: Float = 0.80f
+
+    @Volatile
+    private var ttsDuckingMultiplier: Double = 1.0
 
     @Volatile
     private var inForeground: Boolean = true
@@ -127,6 +131,12 @@ class RpgAudioEngine {
     fun updateContext(context: DynamicThemeContext) {
         themeContext = context
     }
+
+    fun setTtsDucking(active: Boolean) {
+        ttsDuckingMultiplier = if (active) TTS_DUCKING_LEVEL else 1.0
+    }
+
+    fun currentDuckingMultiplier(): Double = ttsDuckingMultiplier
 
     fun setAppForeground(foreground: Boolean) {
         inForeground = foreground
@@ -325,15 +335,20 @@ class RpgAudioEngine {
             var dropletFreq = 1200.0
             var stepTimerSec = 0.0
             var stepIndex = 0
+            var phraseStepCounter = 0
+            var breathPauseRemainingSec = 0.0
+            var progressionTransposeSemitones = 0
             var smoothedOstGain = 0.0
             var smoothedSfxGain = 0.0
+            var smoothedBreathGain = 1.0
             val dt = 1.0 / SAMPLE_RATE
 
             while (!Thread.currentThread().isInterrupted && shouldRunAudio()) {
                 val ctx = themeContext
                 val profile = musicalProfileFor(ctx)
-                val targetOstGain = ostVolume.toDouble().coerceIn(0.0, 1.0)
-                val targetSfxGain = sfxVolume.toDouble().coerceIn(0.0, 1.0)
+                val ducking = ttsDuckingMultiplier.coerceIn(0.15, 1.0)
+                val targetOstGain = ostVolume.toDouble().coerceIn(0.0, 1.0) * ducking
+                val targetSfxGain = sfxVolume.toDouble().coerceIn(0.0, 1.0) * (if (ducking < 0.5) 0.5 else 1.0)
                 val ambientGain = if (ctx.location == AppVisualLocation.GAME) {
                     targetSfxGain * 0.42
                 } else {
@@ -344,50 +359,72 @@ class RpgAudioEngine {
                     smoothedOstGain += (targetOstGain - smoothedOstGain) * 0.0025
                     smoothedSfxGain += (targetSfxGain - smoothedSfxGain) * 0.01
 
+                    val inBreathPause = breathPauseRemainingSec > 0.0
+                    if (inBreathPause) {
+                        breathPauseRemainingSec = (breathPauseRemainingSec - dt).coerceAtLeast(0.0)
+                    }
+                    val targetBreathGain = if (inBreathPause) 0.36 else 1.0
+                    smoothedBreathGain += (targetBreathGain - smoothedBreathGain) * 0.0006
+
                     stepTimerSec += dt
                     if (stepTimerSec >= profile.beatSeconds) {
                         stepTimerSec -= profile.beatSeconds
                         stepIndex++
-                        val chord = profile.chordSemitones[(stepIndex / 4) % profile.chordSemitones.size]
-                        if (stepIndex % 4 == 0 || Random.nextDouble() < 0.72) {
-                            val semitone = if (stepIndex % 2 == 0) {
-                                chord[stepIndex % chord.size]
-                            } else {
-                                profile.melodyOffsets[Random.nextInt(profile.melodyOffsets.size)]
-                            }
-                            val noteHz = profile.rootHz * semitoneRatio(semitone + 12)
-                            arpeggioQueue.add(
-                                ActiveTone(
-                                    freq = noteHz,
-                                    endFreq = noteHz,
-                                    phase = 0.0,
-                                    elapsedSec = 0.0,
-                                    durationSec = profile.beatSeconds * 2.3,
-                                    attackSec = 0.025,
-                                    gain = 0.095,
-                                    waveform = 0
+
+                        if (!inBreathPause) {
+                            phraseStepCounter++
+                            val chordIndex = (stepIndex / 4) % profile.chordSemitones.size
+                            val chord = profile.chordSemitones[chordIndex]
+                            if (stepIndex % 4 == 0 || Random.nextDouble() < 0.68) {
+                                val semitone = if (stepIndex % 2 == 0) {
+                                    chord[stepIndex % chord.size]
+                                } else {
+                                    profile.melodyOffsets[Random.nextInt(profile.melodyOffsets.size)]
+                                }
+                                val noteHz = profile.rootHz * semitoneRatio(semitone + 12 + progressionTransposeSemitones)
+                                arpeggioQueue.add(
+                                    ActiveTone(
+                                        freq = noteHz,
+                                        endFreq = noteHz,
+                                        phase = 0.0,
+                                        elapsedSec = 0.0,
+                                        durationSec = profile.beatSeconds * 2.4,
+                                        attackSec = 0.028,
+                                        gain = 0.092,
+                                        waveform = 0
+                                    )
                                 )
-                            )
-                            if (arpeggioQueue.size > 10) arpeggioQueue.removeAt(0)
+                                if (arpeggioQueue.size > 10) arpeggioQueue.removeAt(0)
+                            }
+
+                            // After 16 beats (one musical phrase), introduce calm breathing "air" (3-6 sec)
+                            // and shift harmonic degree on the next phrase so the OST never feels loopy.
+                            if (phraseStepCounter >= 16) {
+                                phraseStepCounter = 0
+                                progressionTransposeSemitones = PROGRESSION_SHIFTS[(stepIndex / 16) % PROGRESSION_SHIFTS.size]
+                                if (profile.supportsBreathingPauses) {
+                                    breathPauseRemainingSec = Random.nextDouble(3.0, 6.0)
+                                }
+                            }
                         }
                     }
 
                     // 1. OST Pad & Sub Layer
                     val chord = profile.chordSemitones[(stepIndex / 4) % profile.chordSemitones.size]
-                    lfoPhase = (lfoPhase + dt * 0.22) % 1.0
+                    lfoPhase = (lfoPhase + dt * 0.20) % 1.0
                     val lfoBreath = 0.78 + 0.22 * sin(2.0 * PI * lfoPhase)
                     var padMix = 0.0
                     for (v in 0 until minOf(4, chord.size)) {
-                        val freq = profile.rootHz * semitoneRatio(chord[v])
+                        val freq = profile.rootHz * semitoneRatio(chord[v] + progressionTransposeSemitones)
                         padPhases[v] = (padPhases[v] + dt * freq) % 1.0
                         val fundamental = sin(2.0 * PI * padPhases[v])
                         val second = sin(4.0 * PI * padPhases[v]) * profile.padWarmth
                         padMix += (fundamental + second) * 0.22
                     }
-                    val subFreq = (profile.rootHz * semitoneRatio(chord.first())) * 0.5
+                    val subFreq = (profile.rootHz * semitoneRatio(chord.first() + progressionTransposeSemitones)) * 0.5
                     subPhase = (subPhase + dt * subFreq) % 1.0
                     padMix += sin(2.0 * PI * subPhase) * 0.14
-                    padMix *= lfoBreath
+                    padMix *= lfoBreath * smoothedBreathGain
 
                     // OST Arpeggio notes
                     var arpMix = 0.0
@@ -472,7 +509,6 @@ class RpgAudioEngine {
                     }
 
                     val combined = ostSample + (envSample * ambientGain) + (sfxMix * smoothedSfxGain)
-                    // Soft limiter to prevent digital clipping
                     val clamped = (combined / (1.0 + kotlin.math.abs(combined) * 0.35))
                         .coerceIn(-0.98, 0.98)
                     buffer[i] = (clamped * Short.MAX_VALUE).toInt().toShort()
@@ -528,19 +564,21 @@ class RpgAudioEngine {
             return when (ctx.location) {
                 AppVisualLocation.WIZARD -> MusicalScaleProfile(
                     titleRu = "Плетение судьбы",
-                    rootHz = 146.83, // D3
+                    rootHz = 146.83,
                     chordSemitones = listOf(listOf(0, 3, 7, 10), listOf(5, 8, 12, 15), listOf(3, 7, 10, 14)),
                     melodyOffsets = listOf(0, 3, 5, 7, 10, 12),
                     beatSeconds = 0.72,
-                    padWarmth = 0.20
+                    padWarmth = 0.20,
+                    supportsBreathingPauses = true
                 )
                 else -> MusicalScaleProfile(
                     titleRu = "Книжный ноктюрн",
-                    rootHz = 174.61, // F3
+                    rootHz = 174.61,
                     chordSemitones = listOf(listOf(0, 4, 7, 11), listOf(5, 9, 12, 16), listOf(2, 5, 9, 12)),
                     melodyOffsets = listOf(0, 2, 4, 7, 9, 12),
                     beatSeconds = 0.84,
-                    padWarmth = 0.16
+                    padWarmth = 0.16,
+                    supportsBreathingPauses = true
                 )
             }
         }
@@ -549,7 +587,7 @@ class RpgAudioEngine {
         val base = when (arch) {
             UniverseArchetype.COZY_ROMANCE -> MusicalScaleProfile(
                 titleRu = "Тёплое эл. пианино",
-                rootHz = 174.61, // F3
+                rootHz = 174.61,
                 chordSemitones = listOf(listOf(0, 4, 7, 11), listOf(5, 9, 12, 16), listOf(2, 5, 9, 12), listOf(7, 11, 14, 17)),
                 melodyOffsets = listOf(0, 4, 7, 9, 11, 12, 14),
                 beatSeconds = 0.85,
@@ -557,7 +595,7 @@ class RpgAudioEngine {
             )
             UniverseArchetype.CYBERPUNK_SCIFI -> MusicalScaleProfile(
                 titleRu = "Аналоговый неон-синт",
-                rootHz = 130.81, // C3
+                rootHz = 130.81,
                 chordSemitones = listOf(listOf(0, 3, 7, 10), listOf(5, 8, 12, 15), listOf(8, 12, 15, 19), listOf(7, 10, 14, 17)),
                 melodyOffsets = listOf(0, 3, 5, 7, 10, 12, 15),
                 beatSeconds = 0.62,
@@ -565,7 +603,7 @@ class RpgAudioEngine {
             )
             UniverseArchetype.SPACE_SCIFI -> MusicalScaleProfile(
                 titleRu = "Космический дрон",
-                rootHz = 110.00, // A2
+                rootHz = 110.00,
                 chordSemitones = listOf(listOf(0, 7, 12, 16), listOf(5, 12, 17, 21), listOf(3, 10, 15, 19)),
                 melodyOffsets = listOf(0, 4, 7, 11, 12, 19),
                 beatSeconds = 0.96,
@@ -573,7 +611,7 @@ class RpgAudioEngine {
             )
             UniverseArchetype.WITCHER_FANTASY -> MusicalScaleProfile(
                 titleRu = "Лютень и струны",
-                rootHz = 146.83, // D3
+                rootHz = 146.83,
                 chordSemitones = listOf(listOf(0, 3, 7, 12), listOf(-2, 2, 5, 10), listOf(5, 9, 12, 17)),
                 melodyOffsets = listOf(0, 2, 3, 5, 7, 9, 10, 12),
                 beatSeconds = 0.74,
@@ -581,7 +619,7 @@ class RpgAudioEngine {
             )
             UniverseArchetype.SHINOBI_ANIME -> MusicalScaleProfile(
                 titleRu = "Кото и флейта",
-                rootHz = 164.81, // E3
+                rootHz = 164.81,
                 chordSemitones = listOf(listOf(0, 5, 7, 12), listOf(1, 5, 8, 13), listOf(5, 8, 12, 17)),
                 melodyOffsets = listOf(0, 1, 5, 7, 8, 12, 13),
                 beatSeconds = 0.68,
@@ -589,15 +627,16 @@ class RpgAudioEngine {
             )
             UniverseArchetype.TITAN_SURVIVAL -> MusicalScaleProfile(
                 titleRu = "Тревожный оркестр",
-                rootHz = 123.47, // B2
+                rootHz = 123.47,
                 chordSemitones = listOf(listOf(0, 3, 7, 12), listOf(5, 8, 12, 15), listOf(1, 5, 8, 12)),
                 melodyOffsets = listOf(0, 3, 6, 7, 10, 12),
                 beatSeconds = 0.65,
-                padWarmth = 0.30
+                padWarmth = 0.30,
+                supportsBreathingPauses = false
             )
             UniverseArchetype.ARCANE_MYSTERY -> MusicalScaleProfile(
                 titleRu = "Мистическая челеста",
-                rootHz = 164.81, // E3
+                rootHz = 164.81,
                 chordSemitones = listOf(listOf(0, 3, 7, 11), listOf(5, 9, 12, 16), listOf(7, 11, 14, 18)),
                 melodyOffsets = listOf(0, 2, 3, 7, 8, 11, 12),
                 beatSeconds = 0.80,
@@ -605,7 +644,7 @@ class RpgAudioEngine {
             )
             UniverseArchetype.GENERIC_CHRONICLE -> MusicalScaleProfile(
                 titleRu = "Книжный саундтрек",
-                rootHz = 146.83, // D3
+                rootHz = 146.83,
                 chordSemitones = listOf(listOf(0, 4, 7, 11), listOf(5, 9, 12, 16), listOf(3, 7, 10, 14)),
                 melodyOffsets = listOf(0, 2, 4, 7, 9, 12),
                 beatSeconds = 0.82,
@@ -617,11 +656,13 @@ class RpgAudioEngine {
             tenseEmotion -> base.copy(
                 beatSeconds = (base.beatSeconds * 0.82).coerceAtLeast(0.48),
                 padWarmth = (base.padWarmth + 0.12).coerceAtMost(0.45),
-                chordSemitones = listOf(listOf(0, 3, 6, 10), listOf(5, 8, 12, 15), listOf(1, 5, 8, 12))
+                chordSemitones = listOf(listOf(0, 3, 6, 10), listOf(5, 8, 12, 15), listOf(1, 5, 8, 12)),
+                supportsBreathingPauses = false
             )
             warmEmotion -> base.copy(
                 beatSeconds = (base.beatSeconds * 1.06).coerceAtMost(1.05),
-                padWarmth = (base.padWarmth * 0.85)
+                padWarmth = (base.padWarmth * 0.85),
+                supportsBreathingPauses = true
             )
             else -> base
         }
@@ -633,5 +674,7 @@ class RpgAudioEngine {
     private companion object {
         const val SAMPLE_RATE = 22050
         const val FRAMES_PER_CHUNK = 1024
+        const val TTS_DUCKING_LEVEL = 0.25
+        val PROGRESSION_SHIFTS = listOf(0, 0, 2, -2, 0, 5)
     }
 }

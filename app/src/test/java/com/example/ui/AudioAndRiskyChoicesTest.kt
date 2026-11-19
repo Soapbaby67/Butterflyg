@@ -1,22 +1,35 @@
 package com.example.ui
 
 import com.example.core.ChronicleExporter
+import com.example.core.RpgAudioEngine
+import com.example.core.ScenarioCodeCodec
+import com.example.core.SceneNarratorTts
 import com.example.core.describeActiveSoundscape
 import com.example.data.model.ButterflyEvent
 import com.example.data.model.Campaign
 import com.example.data.model.CampaignTurn
 import com.example.data.model.EmotionCategory
-import com.example.data.model.RiskOutcome
+import com.example.data.model.HeroSkills
+import com.example.data.model.InventoryItem
+import com.example.data.model.ItemCategory
+import com.example.data.model.PlayerGender
+import com.example.data.model.QuestEntry
+import com.example.data.model.QuestStatus
 import com.example.data.model.RiskOutcomeTier
 import com.example.data.model.RiskyChoiceResolver
+import com.example.data.model.SessionSetupInput
+import com.example.data.model.SkillType
 import com.example.data.model.TurnChoice
 import com.example.data.repository.GameMasterAiRepository
+import com.example.data.repository.NarrativePace
 import com.example.data.repository.UserAppSettings
 import com.example.ui.theme.AppVisualLocation
 import com.example.ui.theme.DynamicThemeContext
 import com.example.ui.theme.WeatherMood
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
+import org.junit.Assert.assertNotNull
+import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
 import org.junit.Test
 import org.junit.runner.RunWith
@@ -29,11 +42,36 @@ import kotlin.random.Random
 class AudioAndRiskyChoicesTest {
 
     @Test
-    fun audioSettingsHaveSaneDefaults() {
+    fun audioSettingsAndNarrativePaceHaveSaneDefaults() {
         val defaults = UserAppSettings()
         assertTrue(defaults.soundEnabled)
         assertEquals(0.65f, defaults.ostVolume, 0.001f)
         assertEquals(0.80f, defaults.sfxVolume, 0.001f)
+        assertEquals(NarrativePace.BOOKISH, defaults.narrativePace)
+        assertFalse(defaults.autoReadTtsEnabled)
+    }
+
+    @Test
+    fun audioEngineTracksTtsDuckingStateCleanly() {
+        val engine = RpgAudioEngine()
+        assertEquals(1.0, engine.currentDuckingMultiplier(), 0.001)
+        engine.setTtsDucking(true)
+        assertEquals(0.25, engine.currentDuckingMultiplier(), 0.001)
+        engine.setTtsDucking(false)
+        assertEquals(1.0, engine.currentDuckingMultiplier(), 0.001)
+        engine.release()
+    }
+
+    @Test
+    fun ttsSanitizerAndChunkerCleanNarrativeSafely() {
+        val cleaned = SceneNarratorTts.sanitizeForSpeech(
+            "[Локация | Ночь] **Глава** *первая* — дождь   стихает."
+        )
+        assertEquals("Глава первая — дождь стихает.", cleaned)
+        val longText = List(120) { "Герой идёт по тихой улице мимо старых фонарей." }.joinToString(" ")
+        val chunks = SceneNarratorTts.splitIntoTtsChunks(longText)
+        assertTrue(chunks.size >= 2)
+        assertTrue(chunks.all { it.length <= 1850 })
     }
 
     @Test
@@ -57,7 +95,7 @@ class AudioAndRiskyChoicesTest {
     }
 
     @Test
-    fun riskyChoiceResolverDetectsRiskSynthesizesOutcomesAndRollsWeighted() {
+    fun riskyChoiceResolverDetectsRiskSynthesizesOutcomesAndAppliesSkillAndItemModifiers() {
         val safeChoice = TurnChoice(
             id = "1",
             approach = "Дипломатический",
@@ -68,53 +106,112 @@ class AudioAndRiskyChoicesTest {
         val stealthChoice = TurnChoice(
             id = "2",
             approach = "Скрытный",
-            text = "Проскользнуть мимо стражи в архив."
+            text = "Взломать замок и проскользнуть мимо стражи в архив."
         )
         assertTrue(RiskyChoiceResolver.isChoiceRisky(stealthChoice))
 
-        val outcomes = RiskyChoiceResolver.resolveOutcomes(stealthChoice, activeNpcName = "Ирука")
-        assertEquals(4, outcomes.size)
-        assertTrue(outcomes.any { it.description.contains("Ирука") })
+        val baseEval = RiskyChoiceResolver.resolveOutcomesWithModifiers(
+            choice = stealthChoice,
+            activeNpcName = "Ирука",
+            skills = HeroSkills(stealth = 4L),
+            inventoryItems = emptyList()
+        )
+        val boostedEval = RiskyChoiceResolver.resolveOutcomesWithModifiers(
+            choice = stealthChoice,
+            activeNpcName = "Ирука",
+            skills = HeroSkills(stealth = 9L),
+            inventoryItems = listOf(
+                InventoryItem(
+                    id = "lockpick",
+                    name = "Отмычка мастера",
+                    category = ItemCategory.GEAR.key,
+                    isEquipped = true
+                )
+            )
+        )
 
-        val (idx, picked) = RiskyChoiceResolver.pickWeightedOutcome(outcomes, Random(42))
-        assertTrue(idx in outcomes.indices)
-        assertEquals(outcomes[idx], picked)
+        assertEquals(SkillType.STEALTH, boostedEval.modifier.relevantSkill)
+        assertEquals("Отмычка мастера", boostedEval.modifier.matchedItemName)
+        assertTrue(boostedEval.modifier.matchedItemEquipped)
 
-        val prompt = RiskyChoiceResolver.formatOutcomePrompt(stealthChoice.text, picked)
+        val baseSetback = baseEval.outcomes.first { it.tier == RiskOutcomeTier.SETBACK.key }.weight
+        val boostedSetback = boostedEval.outcomes.first { it.tier == RiskOutcomeTier.SETBACK.key }.weight
+        assertTrue("High skill + equipped item should reduce setback risk", boostedSetback < baseSetback)
+        assertTrue("Setback weight should stay at least 10%", boostedSetback >= 10L)
+
+        val (idx, picked) = RiskyChoiceResolver.pickWeightedOutcome(boostedEval.outcomes, Random(42))
+        assertTrue(idx in boostedEval.outcomes.indices)
+
+        val prompt = RiskyChoiceResolver.formatOutcomePrompt(
+            actionText = stealthChoice.text,
+            outcome = picked,
+            modifier = boostedEval.modifier
+        )
         assertTrue(prompt.contains(stealthChoice.text))
         assertTrue(prompt.contains(picked.label))
+        assertTrue(prompt.contains("Скрытность"))
+        assertTrue(prompt.contains("Отмычка мастера"))
     }
 
     @Test
-    fun aiParserExtractsRiskOutcomesAndActiveQuests() {
+    fun aiParserExtractsStructuredInventoryQuestsNpcMemoryAndChapterArchive() {
         val json = """
             {
               "narrative": "Дождь усиливается над крышами.",
               "hudLocation": "Крыша архива",
               "hudTime": "Полночь, ливень",
               "sceneWeather": "rain",
-              "healthPercent": 90,
+              "healthPercent": 88,
               "healthStatus": "Сосредоточен",
-              "currencyLabel": "120 рё",
-              "hudStatusAndInventory": "Здоровье: Сосредоточен (90%)",
+              "currencyAmount": 120,
+              "currencyLabel": "рё",
+              "hudStatusAndInventory": "Здоровье: Сосредоточен (88%)",
               "hudRelationsAndCanon": "Канон: сдвиг",
               "canonDeviationPercent": 18,
               "activeNpc": {
-                "hasActiveNpc": false,
-                "name": "",
-                "emotionLabel": "Спокойствие",
-                "emotionCategory": "calm",
-                "intensity": 1,
-                "note": ""
+                "hasActiveNpc": true,
+                "name": "Ирука",
+                "emotionLabel": "Настороженность",
+                "emotionCategory": "fear",
+                "intensity": 3,
+                "note": "Прислушивается к шагам на черепице."
               },
               "inventory": ["Кунай"],
-              "npcs": [],
+              "inventoryItems": [
+                {
+                  "id": "kunai_steel",
+                  "name": "Стальной кунай",
+                  "category": "weapon",
+                  "quantity": 3,
+                  "isEquipped": true,
+                  "description": "Сбалансированный клинок шиноби."
+                }
+              ],
+              "npcs": [
+                {
+                  "name": "Ирука",
+                  "role": "Наставник",
+                  "trustLevel": 20,
+                  "statusLabel": "Осторожное доверие",
+                  "lastEmotion": "Настороженность",
+                  "lastEmotionCategory": "fear",
+                  "personality": "Заботливый, но строгий",
+                  "boundaries": "Не прощает предательства деревни",
+                  "archetype": "warrior",
+                  "recentActions": ["Предупредил о патруле", "Отдал запасной фонарь"]
+                }
+              ],
               "hasButterflyEvent": false,
               "butterflyEventTitle": "",
               "butterflyEventConsequence": "",
               "butterflyEventImpact": "minor",
               "storySummary": "Герой пробирается к архиву.",
-              "activeQuests": ["Добыть свиток печатей", "Не попасться АНБУ"],
+              "chapterArchiveSummary": "За первые десять ходов герой раскрыл слежку в квартале и заручился поддержкой Ируки.",
+              "activeQuests": ["Добыть свиток печатей"],
+              "quests": [
+                { "id": "q1", "title": "Добыть свиток печатей", "status": "active", "updatedTurn": 10 },
+                { "id": "q2", "title": "Уйти от патруля", "status": "completed", "updatedTurn": 9 }
+              ],
               "choices": [
                 {
                   "id": "1",
@@ -143,26 +240,112 @@ class AudioAndRiskyChoicesTest {
         """.trimIndent()
 
         val repo = GameMasterAiRepository()
-        val outcome = repo.parseTurnOutcome(json, turnNumber = 2L)
+        val outcome = repo.parseTurnOutcome(json, turnNumber = 10L)
 
-        assertEquals(listOf("Добыть свиток печатей", "Не попасться АНБУ"), outcome.activeQuests)
+        assertEquals(88L, outcome.healthPercent)
+        assertEquals(120L, outcome.currencyAmount)
+        assertEquals("рё", outcome.currencyLabel)
+        assertEquals(1, outcome.inventoryItems.size)
+        assertEquals(ItemCategory.WEAPON.key, outcome.inventoryItems.first().category)
+        assertTrue(outcome.inventoryItems.first().isEquipped)
+        assertEquals(3L, outcome.inventoryItems.first().quantity)
+        assertEquals(2, outcome.quests.size)
+        assertEquals(QuestStatus.COMPLETED, outcome.quests[1].resolvedStatus())
+        assertEquals(2, outcome.npcs.first().recentActions.size)
+        assertTrue(outcome.chapterArchiveSummary?.contains("первые десять ходов") == true)
         assertEquals(1, outcome.choices.size)
-        val choice = outcome.choices.first()
-        assertTrue(choice.isRisky)
-        assertEquals(2, choice.riskOutcomes.size)
-        assertEquals(RiskOutcomeTier.TRIUMPH.key, choice.riskOutcomes[0].tier)
-        assertEquals(30L, choice.riskOutcomes[0].weight)
+        assertTrue(outcome.choices.first().isRisky)
     }
 
     @Test
-    fun chronicleExporterFormatsStoryAndButterflyEvents() {
+    fun nextTurnPromptUses7TurnWindowGenderLockAnd10TurnArchiveDirective() {
+        val repo = GameMasterAiRepository()
+        val campaign = Campaign(
+            id = "c_mem",
+            title = "Архив Конохи",
+            universe = "Наруто",
+            playerName = "Алина",
+            playerGender = PlayerGender.FEMALE.key,
+            skills = HeroSkills(might = 4L, stealth = 8L, insight = 6L, lore = 7L),
+            turnCount = 9L,
+            chapterSummaries = listOf("Глава 1: прибытие в деревню."),
+            storySummary = "Текущая арка — проникновение в архив."
+        )
+        val turns = (1L..9L).map { idx ->
+            CampaignTurn(
+                id = "t$idx",
+                turnNumber = idx,
+                playerAction = "Действие $idx",
+                narrative = "Сцена $idx разворачивается под дождём."
+            )
+        }
+
+        val prompt = repo.buildNextTurnPrompt(
+            campaign = campaign,
+            recentTurns = turns,
+            playerAction = "Открыть дверь архива",
+            pinnedFacts = listOf("Обещала вернуть ключ к рассвету"),
+            narrativePace = NarrativePace.DEEP,
+            isReroll = true
+        )
+
+        // Sliding window of 7 turns: turn 3..9 included, turn 1 & 2 omitted
+        assertFalse(prompt.contains("--- Ход 1 ---"))
+        assertFalse(prompt.contains("--- Ход 2 ---"))
+        assertTrue(prompt.contains("--- Ход 3 ---"))
+        assertTrue(prompt.contains("--- Ход 9 ---"))
+        // Gender + Name lock
+        assertTrue(prompt.contains("Алина"))
+        assertTrue(prompt.contains("Женский род"))
+        // 10-turn archive trigger (turnCount = 9 -> nextTurn = 10)
+        assertTrue(prompt.contains("chapterArchiveSummary"))
+        // Deep pace & reroll directive
+        assertTrue(prompt.contains("ГЛУБОКИЙ"))
+        assertTrue(prompt.contains("РЕЖИМ ПЕРЕИГРОВКИ СЦЕНЫ"))
+    }
+
+    @Test
+    fun scenarioCodeCodecRoundTripsAndRejectsInvalidInput() {
+        val setup = SessionSetupInput(
+            title = "Ночной Новиград",
+            universe = "Ведьмак",
+            characterSummary = "Свой персонаж (OC): алхимик-самоучка",
+            startingPoint = "Портовый трактир под дождём",
+            toneAndDifficulty = "Мрачный реализм",
+            playerName = "Мира",
+            playerGender = PlayerGender.FEMALE,
+            skills = HeroSkills(might = 4L, stealth = 7L, insight = 6L, lore = 8L)
+        )
+        val code = ScenarioCodeCodec.encode(setup)
+        assertTrue(code.startsWith("CBW1:"))
+
+        val decoded = ScenarioCodeCodec.decode(code)
+        assertNotNull(decoded)
+        assertEquals(setup.title, decoded!!.title)
+        assertEquals(setup.universe, decoded.universe)
+        assertEquals(setup.playerName, decoded.playerName)
+        assertEquals(PlayerGender.FEMALE, decoded.playerGender)
+        assertEquals(8L, decoded.skills.lore)
+
+        assertNull(ScenarioCodeCodec.decode("INVALID_CODE"))
+        assertNull(ScenarioCodeCodec.decode("CBW1:not-valid-base64!!!"))
+    }
+
+    @Test
+    fun chronicleExporterFormatsTextMarkdownAndHtml() {
         val campaign = Campaign(
             id = "c1",
             title = "Огни Новиграда",
             universe = "Ведьмак",
+            playerName = "Веслав",
+            playerGender = PlayerGender.MALE.key,
             characterSummary = "Веслав из Оксенфурта",
             canonDeviationPercent = 25L,
-            activeQuests = listOf("Найти письмо чародея"),
+            chapterSummaries = listOf("Веслав прибыл в порт и раскрыл заговор контрабандистов."),
+            quests = listOf(
+                QuestEntry(id = "q1", title = "Найти письмо чародея", status = QuestStatus.ACTIVE.key, updatedAtTurn = 2L),
+                QuestEntry(id = "q2", title = "Спасти купца", status = QuestStatus.COMPLETED.key, updatedAtTurn = 2L)
+            ),
             butterflyEvents = listOf(
                 ButterflyEvent(
                     turnNumber = 2L,
@@ -183,5 +366,18 @@ class AudioAndRiskyChoicesTest {
         assertTrue(formatted.contains("Глава 1"))
         assertTrue(formatted.contains("Выбор игрока: Помочь купцу"))
         assertTrue(formatted.contains("Спасён торговец"))
+
+        val markdown = ChronicleExporter.formatChronicleMarkdown(campaign, turns)
+        assertTrue(markdown.startsWith("# Огни Новиграда"))
+        assertTrue(markdown.contains("## Архив глав"))
+        assertTrue(markdown.contains("- [x] Спасти купца"))
+        assertTrue(markdown.contains("### Глава 2"))
+
+        val html = ChronicleExporter.formatChronicleHtml(campaign, turns)
+        assertTrue(html.contains("<!DOCTYPE html>"))
+        assertTrue(html.contains("Оглавление"))
+        assertTrue(html.contains("Глава 2"))
+        assertTrue(html.contains("Спасён торговец"))
     }
 }
+

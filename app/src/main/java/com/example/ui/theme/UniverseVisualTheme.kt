@@ -101,7 +101,8 @@ fun resolveUniverseArchetype(universe: String): UniverseArchetype {
         lower.contains("романт") || lower.contains("повседневн") ||
             lower.contains("рутин") || lower.contains("кампус") ||
             lower.contains("кофей") || lower.contains("slice of life") ||
-            lower.contains("бытовая магия") -> UniverseArchetype.COZY_ROMANCE
+            lower.contains("бытовая магия") || lower.contains("мегаполис") ||
+            lower.contains("современн") -> UniverseArchetype.COZY_ROMANCE
 
         lower.contains("cyberpunk") || lower.contains("кибер") ||
             lower.contains("найт-сити") || lower.contains("sci-fi") ||
@@ -114,7 +115,8 @@ fun resolveUniverseArchetype(universe: String): UniverseArchetype {
             lower.contains("сигансин") || lower.contains("постапок") -> UniverseArchetype.TITAN_SURVIVAL
 
         lower.contains("поттер") || lower.contains("хогвартс") ||
-            lower.contains("слизерин") || (lower.contains("маги") && lower.contains("замок")) -> UniverseArchetype.ARCANE_MYSTERY
+            lower.contains("слизерин") || (lower.contains("маги") && lower.contains("замок")) ||
+            lower.contains("мистик") -> UniverseArchetype.ARCANE_MYSTERY
 
         lower.contains("ведьмак") || lower.contains("новиград") ||
             lower.contains("королевств") || lower.contains("фэнтези") ||
@@ -258,33 +260,44 @@ fun resolveNpcPortraitSpec(
 ): NpcPortraitSpec {
     val combined = "${name.lowercase()} ${role.lowercase()}"
     val universeArch = palette.archetype
+    val isFemale = isLikelyFemaleNpc(name, role)
+    val isModernSetting = universeArch == UniverseArchetype.COZY_ROMANCE ||
+        combined.contains("детектив") || combined.contains("следовател") ||
+        combined.contains("оператив") || combined.contains("бариста") ||
+        combined.contains("студент") || combined.contains("сосед")
+    val isSciFiOrCyber = universeArch == UniverseArchetype.CYBERPUNK_SCIFI ||
+        universeArch == UniverseArchetype.SPACE_SCIFI
 
     val inferred = NpcArchetype.fromKey(explicitArchetype) ?: when {
+        combined.contains("титан") || combined.contains("чудовищ") ||
+            combined.contains("монстр") || combined.contains("звер") ||
+            combined.contains("призрак") || combined.contains("демон") ||
+            combined.contains("дух") || combined.contains("фантом") -> NpcArchetype.CREATURE
+
         combined.contains("фиксер") || combined.contains("нетраннер") ||
             combined.contains("хакер") || combined.contains("киборг") ||
             combined.contains("корпорат") || combined.contains("пилот") ||
             combined.contains("инженер") || combined.contains("бортовой") -> NpcArchetype.CYBER
 
-        combined.contains("титан") || combined.contains("чудовищ") ||
-            combined.contains("монстр") || combined.contains("звер") ||
-            combined.contains("призрак") || combined.contains("демон") -> NpcArchetype.CREATURE
-
         combined.contains("контрабанд") || combined.contains("вор") ||
             combined.contains("шпион") || combined.contains("убийц") ||
             combined.contains("развед") || combined.contains("агент") ||
             combined.contains("тень") || combined.contains("плут") ||
-            combined.contains("напарник") || combined.contains("оператив") -> NpcArchetype.ROGUE
+            combined.contains("напарник") || combined.contains("оператив") ||
+            combined.contains("детектив") || combined.contains("следовател") -> NpcArchetype.ROGUE
 
         combined.contains("торгов") || combined.contains("купец") ||
             combined.contains("трактир") || combined.contains("корчмар") ||
             combined.contains("ростов") || combined.contains("лавк") ||
             combined.contains("бариста") || combined.contains("пекар") -> NpcArchetype.MERCHANT
 
-        combined.contains("леди") || combined.contains("графин") ||
-            combined.contains("княж") || combined.contains("королев") ||
-            combined.contains("чародейк") || combined.contains("ведьм") ||
-            combined.contains("госпож") || combined.contains("дипломат") ||
-            isLikelyFemaleRussianName(name) -> NpcArchetype.NOBLE
+        combined.contains("маг") || combined.contains("наставник") ||
+            combined.contains("учён") || combined.contains("жрец") ||
+            combined.contains("профессор") || combined.contains("инквизитор") ||
+            combined.contains("алхимик") || combined.contains("лекар") ||
+            combined.contains("доктор") || combined.contains("преподав") ||
+            combined.contains("чародей") || combined.contains("ведьм") ||
+            combined.contains("архивар") || combined.contains("библиотек") -> NpcArchetype.MAGE
 
         combined.contains("страж") || combined.contains("рыцар") ||
             combined.contains("ведьмак") || combined.contains("солдат") ||
@@ -292,14 +305,16 @@ fun resolveNpcPortraitSpec(
             combined.contains("охран") || combined.contains("воин") ||
             combined.contains("шиноби") || combined.contains("гарнизон") -> NpcArchetype.WARRIOR
 
-        combined.contains("маг") || combined.contains("наставник") ||
-            combined.contains("учён") || combined.contains("жрец") ||
-            combined.contains("профессор") || combined.contains("инквизитор") ||
-            combined.contains("алхимик") || combined.contains("лекар") ||
-            combined.contains("доктор") || combined.contains("преподав") -> NpcArchetype.MAGE
+        combined.contains("леди") || combined.contains("графин") ||
+            combined.contains("княж") || combined.contains("королев") ||
+            combined.contains("госпож") || combined.contains("дипломат") ||
+            combined.contains("аристократ") -> NpcArchetype.NOBLE
 
-        universeArch == UniverseArchetype.CYBERPUNK_SCIFI ||
-            universeArch == UniverseArchetype.SPACE_SCIFI -> NpcArchetype.CYBER
+        isSciFiOrCyber -> NpcArchetype.CYBER
+
+        isModernSetting -> NpcArchetype.COMMONER
+
+        isFemale -> NpcArchetype.NOBLE
 
         else -> {
             val hash = abs(name.trim().lowercase().hashCode())
@@ -312,41 +327,87 @@ fun resolveNpcPortraitSpec(
         }
     }
 
-    return when (inferred) {
-        NpcArchetype.WARRIOR -> NpcPortraitSpec.PhotoPortrait(
-            resId = R.drawable.img_npc_warrior,
-            tintOverlay = palette.atmosphericTint.copy(alpha = 0.14f),
-            archetype = inferred
-        )
-        NpcArchetype.ROGUE -> NpcPortraitSpec.PhotoPortrait(
-            resId = R.drawable.img_npc_rogue,
-            tintOverlay = palette.atmosphericTint.copy(alpha = 0.16f),
-            archetype = inferred
-        )
-        NpcArchetype.MAGE -> NpcPortraitSpec.PhotoPortrait(
-            resId = R.drawable.img_npc_mystic,
-            tintOverlay = palette.atmosphericTint.copy(alpha = 0.14f),
-            archetype = inferred
-        )
-        NpcArchetype.NOBLE -> NpcPortraitSpec.PhotoPortrait(
-            resId = R.drawable.img_npc_lady,
-            tintOverlay = palette.atmosphericTint.copy(alpha = 0.12f),
-            archetype = inferred
-        )
-        NpcArchetype.CYBER -> NpcPortraitSpec.PhotoPortrait(
-            resId = R.drawable.img_npc_cyber,
-            tintOverlay = palette.accentPrimary.copy(alpha = 0.12f),
-            archetype = inferred
-        )
-        NpcArchetype.MERCHANT, NpcArchetype.COMMONER, NpcArchetype.CREATURE -> {
-            NpcPortraitSpec.SilhouetteEmblem(
-                archetype = inferred,
-                backgroundStart = palette.atmosphericTint,
-                backgroundEnd = palette.accentSecondary.copy(alpha = 0.55f),
-                accentColor = palette.accentPrimary
-            )
+    val photoRes: Int? = when (inferred) {
+        NpcArchetype.WARRIOR -> when {
+            isSciFiOrCyber -> if (isFemale) R.drawable.img_npc_cyber_hacker_f else R.drawable.img_npc_cyber_merc_m
+            isFemale -> R.drawable.img_npc_fantasy_knight_f
+            else -> R.drawable.img_npc_warrior
+        }
+
+        NpcArchetype.ROGUE -> when {
+            isModernSetting && !isFemale -> R.drawable.img_npc_modern_detective_m
+            isModernSetting && isFemale -> R.drawable.img_npc_modern_woman
+            isSciFiOrCyber -> if (isFemale) R.drawable.img_npc_cyber_hacker_f else R.drawable.img_npc_cyber_merc_m
+            else -> R.drawable.img_npc_rogue
+        }
+
+        NpcArchetype.MAGE -> when {
+            universeArch == UniverseArchetype.ARCANE_MYSTERY && isFemale -> R.drawable.img_npc_mystic_scholar_f
+            isFemale -> R.drawable.img_npc_fantasy_mage_f
+            else -> R.drawable.img_npc_mystic
+        }
+
+        NpcArchetype.NOBLE -> when {
+            isModernSetting -> if (isFemale) R.drawable.img_npc_modern_woman else R.drawable.img_npc_modern_man
+            isFemale -> R.drawable.img_npc_lady
+            else -> R.drawable.img_npc_warrior
+        }
+
+        NpcArchetype.CYBER -> when {
+            isFemale -> R.drawable.img_npc_cyber_hacker_f
+            combined.contains("наёмн") || combined.contains("фиксер") ||
+                combined.contains("охран") || combined.contains("бойц") -> R.drawable.img_npc_cyber_merc_m
+            else -> R.drawable.img_npc_cyber
+        }
+
+        NpcArchetype.MERCHANT -> when {
+            isModernSetting -> if (isFemale) R.drawable.img_npc_modern_woman else R.drawable.img_npc_modern_man
+            else -> R.drawable.img_npc_fantasy_merchant_m
+        }
+
+        NpcArchetype.CREATURE -> R.drawable.img_npc_mystic_spirit
+
+        NpcArchetype.COMMONER -> when {
+            isModernSetting -> if (isFemale) R.drawable.img_npc_modern_woman else R.drawable.img_npc_modern_man
+            else -> null
         }
     }
+
+    return if (photoRes != null) {
+        val overlay = if (inferred == NpcArchetype.CYBER) {
+            palette.accentPrimary.copy(alpha = 0.12f)
+        } else {
+            palette.atmosphericTint.copy(alpha = 0.14f)
+        }
+        NpcPortraitSpec.PhotoPortrait(
+            resId = photoRes,
+            tintOverlay = overlay,
+            archetype = inferred
+        )
+    } else {
+        NpcPortraitSpec.SilhouetteEmblem(
+            archetype = inferred,
+            backgroundStart = palette.atmosphericTint,
+            backgroundEnd = palette.accentSecondary.copy(alpha = 0.55f),
+            accentColor = palette.accentPrimary
+        )
+    }
+}
+
+private fun isLikelyFemaleNpc(name: String, role: String): Boolean {
+    val roleLower = role.lowercase()
+    val femaleRoleMarkers = listOf(
+        "леди", "графин", "княж", "королев", "чародейк", "ведьм", "госпож",
+        "сестр", "подруг", "девушк", "женщин", "напарниц", "учениц", "студентк",
+        "колдун", "воительниц", "лучниц", "хакерш", "официантк", "хозяйк", "жриц"
+    )
+    if (femaleRoleMarkers.any { roleLower.contains(it) }) return true
+    val maleRoleMarkers = listOf(
+        "лорд", "граф ", "князь", "король", "мужчин", "юнош", "парень", "купец",
+        "трактирщик", "рыцарь", "наёмник", "детектив", "капитан", "профессор"
+    )
+    if (maleRoleMarkers.any { roleLower.contains(it) } && !isLikelyFemaleRussianName(name)) return false
+    return isLikelyFemaleRussianName(name)
 }
 
 private fun isLikelyFemaleRussianName(name: String): Boolean {
@@ -356,10 +417,12 @@ private fun isLikelyFemaleRussianName(name: String): Boolean {
         "трисс", "йеннифэр", "цири", "микаса", "энни", "хистория", "сакура",
         "цунаде", "хината", "гермиона", "джинни", "полумна", "беллатриса",
         "джуди", "панам", "роуг", "кейра", "шани", "эвелин", "арина",
-        "алиса", "елена", "софия", "анна", "дарья", "полина", "ксюша", "вера"
+        "алиса", "елена", "софия", "анна", "дарья", "полина", "ксюша", "вера",
+        "мария", "ольга", "наталья", "катерина", "виктория", "кира", "лира",
+        "марта", "клара", "астрид", "фрейя", "элли", "хлоя", "зоя", "нина", "ирина"
     )
     if (firstWord in femaleKnown) return true
-    val maleExceptions = setOf("никита", "илья", "лука", "фома", "кузьма", "савва", "данила")
+    val maleExceptions = setOf("никита", "илья", "лука", "фома", "кузьма", "савва", "данила", "миша", "саша")
     if (firstWord in maleExceptions) return false
     return firstWord.endsWith("а") || firstWord.endsWith("я")
 }

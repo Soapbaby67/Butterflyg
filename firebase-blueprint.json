@@ -2,7 +2,7 @@
   "entities": {
     "Campaign": {
       "title": "Campaign",
-      "description": "User-owned interactive text RPG campaign slot with 4-question world setup, HUD state, active NPC emotion, inventory, NPC relationships, and butterfly-effect timeline.",
+      "description": "User-owned interactive text RPG campaign slot with world setup, hero name/gender, explicit numeric vitals, 4 hero skills, structured inventory, quest tracker, chapter archives, active NPC emotion, NPC relationships, and butterfly-effect timeline.",
       "type": "object",
       "properties": {
         "userId": {
@@ -15,19 +15,27 @@
         },
         "universe": {
           "type": "string",
-          "description": "Question 1: Chosen universe (anime, book, series, game, or original world)."
+          "description": "Chosen universe (anime, book, series, game, or original world)."
         },
         "characterSummary": {
           "type": "string",
-          "description": "Question 2: Player character role (canon, OC, or isekai), name, skills, and starting traits."
+          "description": "Player character role (canon, OC, or isekai), traits, and background."
+        },
+        "playerName": {
+          "type": "string",
+          "description": "Explicit hero display name used to lock narrative continuity."
+        },
+        "playerGender": {
+          "type": "string",
+          "description": "Explicit hero grammatical gender (male, female, neutral)."
         },
         "startingPoint": {
           "type": "string",
-          "description": "Question 3: Story moment and starting location."
+          "description": "Story moment and starting location."
         },
         "toneAndDifficulty": {
           "type": "string",
-          "description": "Question 4: Atmosphere tone and harshness of consequences."
+          "description": "Atmosphere tone and harshness of consequences."
         },
         "turnCount": {
           "type": "integer",
@@ -53,25 +61,57 @@
           "type": "integer",
           "description": "Estimated butterfly-effect deviation from original canon (0 to 100)."
         },
+        "healthPercent": {
+          "type": "integer",
+          "description": "Explicit numeric health percentage (0 to 100, or -1 for legacy fallback)."
+        },
+        "currencyAmount": {
+          "type": "integer",
+          "description": "Explicit numeric currency amount."
+        },
+        "currencyLabel": {
+          "type": "string",
+          "description": "Currency unit or formatted display label."
+        },
+        "skills": {
+          "type": "object",
+          "description": "4 universal hero skills (might, stealth, insight, lore) rated 1-10."
+        },
         "activeNpc": {
           "type": "object",
           "description": "Snapshot of the currently interacting NPC and their visible emotional state."
         },
         "inventory": {
           "type": "array",
-          "description": "Bounded list of character inventory items."
+          "description": "Legacy flat list of item names synced for backwards compatibility."
+        },
+        "inventoryItems": {
+          "type": "array",
+          "description": "Structured inventory items with id, name, category, quantity, isEquipped, description."
         },
         "npcs": {
           "type": "array",
-          "description": "Bounded list of encountered NPC relationship snapshots."
+          "description": "Bounded list of encountered NPC relationship snapshots including recentActions."
         },
         "butterflyEvents": {
           "type": "array",
           "description": "Bounded list of canon-altering butterfly effect milestones."
         },
+        "activeQuests": {
+          "type": "array",
+          "description": "Legacy active quest titles synced for backwards compatibility."
+        },
+        "quests": {
+          "type": "array",
+          "description": "Structured quest entries with id, title, status (active/completed/failed), and updatedAtTurn."
+        },
         "storySummary": {
           "type": "string",
-          "description": "Rolling summary of the campaign plot so far."
+          "description": "Rolling summary of the current narrative arc."
+        },
+        "chapterSummaries": {
+          "type": "array",
+          "description": "Compressed 10-turn chapter archive summaries for two-tier long-term memory."
         },
         "createdAt": {
           "type": "string",
@@ -108,7 +148,7 @@
     },
     "CampaignTurn": {
       "title": "CampaignTurn",
-      "description": "Immutable narrative turn in an RPG campaign including player action, GM prose, HUD snapshot, active NPC emotion, and branching choices.",
+      "description": "Immutable narrative turn in an RPG campaign including player action, GM prose, HUD snapshot, active NPC emotion, branching choices, and stateSnapshot for rollback/forking.",
       "type": "object",
       "properties": {
         "userId": {
@@ -129,7 +169,7 @@
         },
         "narrative": {
           "type": "string",
-          "description": "2-4 paragraphs of anti-godmodding GM narrative prose."
+          "description": "Anti-godmodding GM narrative prose."
         },
         "hudLine": {
           "type": "string",
@@ -142,6 +182,10 @@
         "choices": {
           "type": "array",
           "description": "3-4 distinct branching choices offered at the end of this turn."
+        },
+        "stateSnapshot": {
+          "type": "object",
+          "description": "Campaign state snapshot captured at this turn for atomic rollback and timeline forking."
         },
         "createdAt": {
           "type": "string",

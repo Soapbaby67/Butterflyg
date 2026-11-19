@@ -3,6 +3,9 @@ package com.example.ui
 import com.example.R
 import com.example.data.model.Campaign
 import com.example.data.model.EmotionCategory
+import com.example.data.model.HeroSkills
+import com.example.data.model.InventoryItem
+import com.example.data.model.ItemCategory
 import com.example.data.model.NpcRelation
 import com.example.data.model.ScenarioGenre
 import com.example.data.model.UniversePresets
@@ -61,6 +64,45 @@ class HudStatsAndVisualThemeTest {
     }
 
     @Test
+    fun prefersExplicitNumericVitalsAndStructuredInventoryOverRegexFallback() {
+        val campaign = Campaign(
+            id = "structured_1",
+            title = "Неоновый след",
+            universe = "Cyberpunk 2077 (Найт-Сити)",
+            hudLocation = "Рынок Кабуки",
+            hudTime = "Ночь, неон",
+            hudStatusAndInventory = "Здоровье: в норме",
+            healthPercent = 64L,
+            currencyAmount = 450L,
+            currencyLabel = "эвродолларов",
+            skills = HeroSkills(might = 4L, stealth = 8L, insight = 7L, lore = 6L),
+            inventoryItems = listOf(
+                InventoryItem(
+                    id = "deck_1",
+                    name = "Кибердека Arasaka",
+                    category = ItemCategory.GEAR.key,
+                    quantity = 1L,
+                    isEquipped = true
+                ),
+                InventoryItem(
+                    id = "stim_1",
+                    name = "Стимулятор",
+                    category = ItemCategory.CONSUMABLE.key,
+                    quantity = 2L,
+                    isEquipped = false
+                )
+            )
+        )
+
+        val stats = HudStatsParser.parse(campaign)
+        assertEquals(64, stats.healthPercent)
+        assertEquals("450 эвродолларов", stats.currencyLabel)
+        assertEquals(2, stats.structuredInventory.size)
+        assertTrue(stats.structuredInventory.first().isEquipped)
+        assertEquals(8L, stats.skills.stealth)
+    }
+
+    @Test
     fun resolvesUniversesAndSceneBackdropsCorrectly() {
         assertEquals(
             UniverseArchetype.CYBERPUNK_SCIFI,
@@ -102,14 +144,16 @@ class HudStatsAndVisualThemeTest {
 
     @Test
     fun resolvesDiverseNpcPortraitsAndSilhouettes() {
-        val palette = resolveUniverseVisualPalette("Ведьмак", isDark = true)
+        val fantasyPalette = resolveUniverseVisualPalette("Ведьмак", isDark = true)
+        val cyberPalette = resolveUniverseVisualPalette("Cyberpunk 2077", isDark = true)
+        val cozyPalette = resolveUniverseVisualPalette("Современный город, романтика", isDark = false)
 
         val smuggler = resolveNpcPortraitSpec(
             name = "Контрабандист",
             role = "Торговый агент в доках",
             universe = "Ведьмак",
             explicitArchetype = "",
-            palette = palette
+            palette = fantasyPalette
         )
         assertTrue(smuggler is NpcPortraitSpec.PhotoPortrait)
         assertEquals(NpcArchetype.ROGUE, (smuggler as NpcPortraitSpec.PhotoPortrait).archetype)
@@ -119,20 +163,50 @@ class HudStatsAndVisualThemeTest {
             role = "Чародейка",
             universe = "Ведьмак",
             explicitArchetype = "",
-            palette = palette
+            palette = fantasyPalette
         )
         assertTrue(sorceress is NpcPortraitSpec.PhotoPortrait)
-        assertEquals(NpcArchetype.NOBLE, (sorceress as NpcPortraitSpec.PhotoPortrait).archetype)
+        assertEquals(R.drawable.img_npc_fantasy_mage_f, (sorceress as NpcPortraitSpec.PhotoPortrait).resId)
 
         val merchant = resolveNpcPortraitSpec(
             name = "Берндт",
             role = "Трактирщик",
             universe = "Ведьмак",
             explicitArchetype = "merchant",
-            palette = palette
+            palette = fantasyPalette
         )
-        assertTrue(merchant is NpcPortraitSpec.SilhouetteEmblem)
-        assertEquals(NpcArchetype.MERCHANT, (merchant as NpcPortraitSpec.SilhouetteEmblem).archetype)
+        assertTrue(merchant is NpcPortraitSpec.PhotoPortrait)
+        assertEquals(R.drawable.img_npc_fantasy_merchant_m, (merchant as NpcPortraitSpec.PhotoPortrait).resId)
+
+        val femaleHacker = resolveNpcPortraitSpec(
+            name = "Кира",
+            role = "Нетраннер",
+            universe = "Cyberpunk 2077",
+            explicitArchetype = "cyber",
+            palette = cyberPalette
+        )
+        assertTrue(femaleHacker is NpcPortraitSpec.PhotoPortrait)
+        assertEquals(R.drawable.img_npc_cyber_hacker_f, (femaleHacker as NpcPortraitSpec.PhotoPortrait).resId)
+
+        val barista = resolveNpcPortraitSpec(
+            name = "Елена",
+            role = "Бариста в кофейне",
+            universe = "Современный город, романтика",
+            explicitArchetype = "",
+            palette = cozyPalette
+        )
+        assertTrue(barista is NpcPortraitSpec.PhotoPortrait)
+        assertEquals(R.drawable.img_npc_modern_woman, (barista as NpcPortraitSpec.PhotoPortrait).resId)
+
+        val unnamedCommoner = resolveNpcPortraitSpec(
+            name = "Прохожий",
+            role = "Житель квартала",
+            universe = "Ведьмак",
+            explicitArchetype = "commoner",
+            palette = fantasyPalette
+        )
+        assertTrue(unnamedCommoner is NpcPortraitSpec.SilhouetteEmblem)
+        assertEquals(NpcArchetype.COMMONER, (unnamedCommoner as NpcPortraitSpec.SilhouetteEmblem).archetype)
     }
 
     @Test

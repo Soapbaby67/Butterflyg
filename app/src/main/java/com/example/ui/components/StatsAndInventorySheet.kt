@@ -25,6 +25,7 @@ import androidx.compose.material.icons.outlined.Favorite
 import androidx.compose.material.icons.outlined.Forum
 import androidx.compose.material.icons.outlined.Paid
 import androidx.compose.material.icons.outlined.Schedule
+import androidx.compose.material.icons.outlined.Shield
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.FilledTonalButton
 import androidx.compose.material3.HorizontalDivider
@@ -46,6 +47,8 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import com.example.data.model.Campaign
+import com.example.data.model.InventoryItem
+import com.example.data.model.SkillType
 import com.example.ui.theme.UniverseVisualPalette
 
 @OptIn(ExperimentalMaterial3Api::class)
@@ -54,7 +57,7 @@ fun StatsAndInventorySheet(
     campaign: Campaign,
     stats: ParsedHudStats,
     palette: UniverseVisualPalette,
-    onItemClick: (String) -> Unit,
+    onItemClick: (InventoryItem) -> Unit,
     onOpenCodex: () -> Unit,
     onDismiss: () -> Unit
 ) {
@@ -70,9 +73,9 @@ fun StatsAndInventorySheet(
             campaign = campaign,
             stats = stats,
             palette = palette,
-            onItemClick = { itemName ->
+            onItemClick = { item ->
                 onDismiss()
-                onItemClick(itemName)
+                onItemClick(item)
             },
             onOpenCodex = {
                 onDismiss()
@@ -90,7 +93,7 @@ fun StatsAndInventoryContent(
     campaign: Campaign,
     stats: ParsedHudStats,
     palette: UniverseVisualPalette,
-    onItemClick: (String) -> Unit,
+    onItemClick: (InventoryItem) -> Unit,
     onOpenCodex: () -> Unit,
     modifier: Modifier = Modifier
 ) {
@@ -125,7 +128,7 @@ fun StatsAndInventoryContent(
             ) {
                 Column(modifier = Modifier.weight(1f)) {
                     Text(
-                        text = "Статистика и снаряжение",
+                        text = campaign.playerName.ifBlank { "Статистика и снаряжение" },
                         style = MaterialTheme.typography.headlineSmall,
                         fontWeight = FontWeight.SemiBold,
                         color = MaterialTheme.colorScheme.onSurface
@@ -138,316 +141,396 @@ fun StatsAndInventoryContent(
                         overflow = TextOverflow.Ellipsis
                     )
                 }
-                    Surface(
-                        color = palette.accentPrimary.copy(alpha = 0.14f),
-                        shape = RoundedCornerShape(999.dp),
-                        border = BorderStroke(1.dp, palette.accentPrimary.copy(alpha = 0.35f))
+                Surface(
+                    color = palette.accentPrimary.copy(alpha = 0.14f),
+                    shape = RoundedCornerShape(999.dp),
+                    border = BorderStroke(1.dp, palette.accentPrimary.copy(alpha = 0.35f))
+                ) {
+                    Row(
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.spacedBy(5.dp),
+                        modifier = Modifier.padding(horizontal = 10.dp, vertical = 5.dp)
                     ) {
-                        Row(
-                            verticalAlignment = Alignment.CenterVertically,
-                            horizontalArrangement = Arrangement.spacedBy(5.dp),
-                            modifier = Modifier.padding(horizontal = 10.dp, vertical = 5.dp)
-                        ) {
-                            Icon(
-                                imageVector = weatherIconFor(stats.weatherMood),
-                                contentDescription = stats.weatherMood.russianLabel,
-                                tint = palette.accentPrimary,
-                                modifier = Modifier.size(14.dp)
-                            )
-                            Text(
-                                text = stats.weatherMood.russianLabel,
-                                style = MaterialTheme.typography.labelSmall,
-                                color = palette.accentPrimary,
-                                fontWeight = FontWeight.SemiBold
-                            )
-                        }
+                        Icon(
+                            imageVector = weatherIconFor(stats.weatherMood),
+                            contentDescription = stats.weatherMood.russianLabel,
+                            tint = palette.accentPrimary,
+                            modifier = Modifier.size(14.dp)
+                        )
+                        Text(
+                            text = stats.weatherMood.russianLabel,
+                            style = MaterialTheme.typography.labelSmall,
+                            color = palette.accentPrimary,
+                            fontWeight = FontWeight.SemiBold
+                        )
                     }
                 }
             }
+        }
 
-            // Location & Time Card
-            item {
-                Surface(
-                    color = MaterialTheme.colorScheme.background.copy(alpha = 0.65f),
-                    shape = MaterialTheme.shapes.medium,
-                    border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant),
-                    modifier = Modifier.fillMaxWidth()
+        // Location & Time Card
+        item {
+            Surface(
+                color = MaterialTheme.colorScheme.background.copy(alpha = 0.65f),
+                shape = MaterialTheme.shapes.medium,
+                border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant),
+                modifier = Modifier.fillMaxWidth()
+            ) {
+                Column(
+                    modifier = Modifier.padding(14.dp),
+                    verticalArrangement = Arrangement.spacedBy(6.dp)
                 ) {
-                    Column(
-                        modifier = Modifier.padding(14.dp),
-                        verticalArrangement = Arrangement.spacedBy(6.dp)
+                    Row(
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.spacedBy(8.dp)
                     ) {
+                        Icon(
+                            imageVector = Icons.Outlined.Explore,
+                            contentDescription = null,
+                            tint = palette.accentPrimary,
+                            modifier = Modifier.size(16.dp)
+                        )
+                        Text(
+                            text = campaign.hudLocation.ifBlank { "Текущая локация" },
+                            style = MaterialTheme.typography.titleSmall,
+                            fontWeight = FontWeight.SemiBold
+                        )
+                    }
+                    if (campaign.hudTime.isNotBlank()) {
                         Row(
                             verticalAlignment = Alignment.CenterVertically,
                             horizontalArrangement = Arrangement.spacedBy(8.dp)
                         ) {
                             Icon(
-                                imageVector = Icons.Outlined.Explore,
+                                imageVector = Icons.Outlined.Schedule,
                                 contentDescription = null,
-                                tint = palette.accentPrimary,
-                                modifier = Modifier.size(16.dp)
+                                tint = MaterialTheme.colorScheme.onSurfaceVariant,
+                                modifier = Modifier.size(15.dp)
                             )
                             Text(
-                                text = campaign.hudLocation.ifBlank { "Текущая локация" },
-                                style = MaterialTheme.typography.titleSmall,
-                                fontWeight = FontWeight.SemiBold
+                                text = campaign.hudTime,
+                                style = MaterialTheme.typography.bodySmall,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant
                             )
-                        }
-                        if (campaign.hudTime.isNotBlank()) {
-                            Row(
-                                verticalAlignment = Alignment.CenterVertically,
-                                horizontalArrangement = Arrangement.spacedBy(8.dp)
-                            ) {
-                                Icon(
-                                    imageVector = Icons.Outlined.Schedule,
-                                    contentDescription = null,
-                                    tint = MaterialTheme.colorScheme.onSurfaceVariant,
-                                    modifier = Modifier.size(15.dp)
-                                )
-                                Text(
-                                    text = campaign.hudTime,
-                                    style = MaterialTheme.typography.bodySmall,
-                                    color = MaterialTheme.colorScheme.onSurfaceVariant
-                                )
-                            }
                         }
                     }
                 }
             }
+        }
 
-            // Health, Currency & Butterfly Meter Card
-            item {
-                Surface(
-                    color = MaterialTheme.colorScheme.background.copy(alpha = 0.65f),
-                    shape = MaterialTheme.shapes.medium,
-                    border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant),
-                    modifier = Modifier.fillMaxWidth()
+        // Health, Currency & Butterfly Meter Card
+        item {
+            Surface(
+                color = MaterialTheme.colorScheme.background.copy(alpha = 0.65f),
+                shape = MaterialTheme.shapes.medium,
+                border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant),
+                modifier = Modifier.fillMaxWidth()
+            ) {
+                Column(
+                    modifier = Modifier.padding(14.dp),
+                    verticalArrangement = Arrangement.spacedBy(12.dp)
                 ) {
-                    Column(
-                        modifier = Modifier.padding(14.dp),
-                        verticalArrangement = Arrangement.spacedBy(12.dp)
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.SpaceBetween,
+                        verticalAlignment = Alignment.CenterVertically
                     ) {
-                        Row(
-                            modifier = Modifier.fillMaxWidth(),
-                            horizontalArrangement = Arrangement.SpaceBetween,
-                            verticalAlignment = Alignment.CenterVertically
-                        ) {
-                            Row(
-                                verticalAlignment = Alignment.CenterVertically,
-                                horizontalArrangement = Arrangement.spacedBy(6.dp)
-                            ) {
-                                Icon(
-                                    imageVector = Icons.Outlined.Favorite,
-                                    contentDescription = null,
-                                    tint = healthColor,
-                                    modifier = Modifier.size(16.dp)
-                                )
-                                Text(
-                                    text = "${stats.healthLabel} (${stats.healthPercent}%)",
-                                    style = MaterialTheme.typography.titleSmall,
-                                    fontWeight = FontWeight.SemiBold
-                                )
-                            }
-                            if (stats.currencyLabel.isNotBlank()) {
-                                Surface(
-                                    color = palette.accentSecondary.copy(alpha = 0.16f),
-                                    shape = RoundedCornerShape(999.dp),
-                                    border = BorderStroke(1.dp, palette.accentSecondary.copy(alpha = 0.35f))
-                                ) {
-                                    Row(
-                                        verticalAlignment = Alignment.CenterVertically,
-                                        horizontalArrangement = Arrangement.spacedBy(4.dp),
-                                        modifier = Modifier.padding(horizontal = 9.dp, vertical = 4.dp)
-                                    ) {
-                                        Icon(
-                                            imageVector = Icons.Outlined.Paid,
-                                            contentDescription = "Ресурсы",
-                                            tint = palette.accentSecondary,
-                                            modifier = Modifier.size(14.dp)
-                                        )
-                                        Text(
-                                            text = stats.currencyLabel,
-                                            style = MaterialTheme.typography.labelSmall,
-                                            fontWeight = FontWeight.SemiBold,
-                                            color = palette.accentSecondary
-                                        )
-                                    }
-                                }
-                            }
-                        }
-
-                        LinearProgressIndicator(
-                            progress = { healthFraction },
-                            modifier = Modifier
-                                .fillMaxWidth()
-                                .height(8.dp)
-                                .clip(RoundedCornerShape(999.dp)),
-                            color = healthColor,
-                            trackColor = MaterialTheme.colorScheme.outlineVariant
-                        )
-
-                        HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant)
-
-                        Row(
-                            modifier = Modifier.fillMaxWidth(),
-                            horizontalArrangement = Arrangement.SpaceBetween,
-                            verticalAlignment = Alignment.CenterVertically
-                        ) {
-                            Row(
-                                verticalAlignment = Alignment.CenterVertically,
-                                horizontalArrangement = Arrangement.spacedBy(6.dp)
-                            ) {
-                                Icon(
-                                    imageVector = Icons.Outlined.AutoAwesome,
-                                    contentDescription = null,
-                                    tint = palette.accentSecondary,
-                                    modifier = Modifier.size(16.dp)
-                                )
-                                Text(
-                                    text = "Эффект бабочки",
-                                    style = MaterialTheme.typography.titleSmall
-                                )
-                            }
-                            Text(
-                                text = "${campaign.canonDeviationPercent.coerceIn(0L, 100L)}% • событий: ${campaign.butterflyEvents.size}",
-                                style = MaterialTheme.typography.labelMedium,
-                                fontWeight = FontWeight.SemiBold,
-                                color = palette.accentSecondary
-                            )
-                        }
-
-                        LinearProgressIndicator(
-                            progress = { canonFraction },
-                            modifier = Modifier
-                                .fillMaxWidth()
-                                .height(7.dp)
-                                .clip(RoundedCornerShape(999.dp)),
-                            color = palette.accentSecondary,
-                            trackColor = MaterialTheme.colorScheme.outlineVariant
-                        )
-
                         Row(
                             verticalAlignment = Alignment.CenterVertically,
                             horizontalArrangement = Arrangement.spacedBy(6.dp)
                         ) {
                             Icon(
-                                imageVector = Icons.Outlined.Forum,
+                                imageVector = Icons.Outlined.Favorite,
                                 contentDescription = null,
-                                tint = palette.accentPrimary,
-                                modifier = Modifier.size(15.dp)
+                                tint = healthColor,
+                                modifier = Modifier.size(16.dp)
                             )
                             Text(
-                                text = "Отношения: ${stats.relationsSummary}",
-                                style = MaterialTheme.typography.bodySmall,
-                                color = MaterialTheme.colorScheme.onSurfaceVariant,
-                                maxLines = 2,
-                                overflow = TextOverflow.Ellipsis
+                                text = "${stats.healthLabel} (${stats.healthPercent}%)",
+                                style = MaterialTheme.typography.titleSmall,
+                                fontWeight = FontWeight.SemiBold
+                            )
+                        }
+                        if (stats.currencyLabel.isNotBlank()) {
+                            Surface(
+                                color = palette.accentSecondary.copy(alpha = 0.16f),
+                                shape = RoundedCornerShape(999.dp),
+                                border = BorderStroke(1.dp, palette.accentSecondary.copy(alpha = 0.35f))
+                            ) {
+                                Row(
+                                    verticalAlignment = Alignment.CenterVertically,
+                                    horizontalArrangement = Arrangement.spacedBy(4.dp),
+                                    modifier = Modifier.padding(horizontal = 9.dp, vertical = 4.dp)
+                                ) {
+                                    Icon(
+                                        imageVector = Icons.Outlined.Paid,
+                                        contentDescription = "Ресурсы",
+                                        tint = palette.accentSecondary,
+                                        modifier = Modifier.size(14.dp)
+                                    )
+                                    Text(
+                                        text = stats.currencyLabel,
+                                        style = MaterialTheme.typography.labelSmall,
+                                        fontWeight = FontWeight.SemiBold,
+                                        color = palette.accentSecondary
+                                    )
+                                }
+                            }
+                        }
+                    }
+
+                    LinearProgressIndicator(
+                        progress = { healthFraction },
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .height(8.dp)
+                            .clip(RoundedCornerShape(999.dp)),
+                        color = healthColor,
+                        trackColor = MaterialTheme.colorScheme.outlineVariant
+                    )
+
+                    HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant)
+
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.SpaceBetween,
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Row(
+                            verticalAlignment = Alignment.CenterVertically,
+                            horizontalArrangement = Arrangement.spacedBy(6.dp)
+                        ) {
+                            Icon(
+                                imageVector = Icons.Outlined.AutoAwesome,
+                                contentDescription = null,
+                                tint = palette.accentSecondary,
+                                modifier = Modifier.size(16.dp)
+                            )
+                            Text(
+                                text = "Эффект бабочки",
+                                style = MaterialTheme.typography.titleSmall
+                            )
+                        }
+                        Text(
+                            text = "${campaign.canonDeviationPercent.coerceIn(0L, 100L)}% • событий: ${campaign.butterflyEvents.size}",
+                            style = MaterialTheme.typography.labelMedium,
+                            fontWeight = FontWeight.SemiBold,
+                            color = palette.accentSecondary
+                        )
+                    }
+
+                    LinearProgressIndicator(
+                        progress = { canonFraction },
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .height(7.dp)
+                            .clip(RoundedCornerShape(999.dp)),
+                        color = palette.accentSecondary,
+                        trackColor = MaterialTheme.colorScheme.outlineVariant
+                    )
+
+                    Row(
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.spacedBy(6.dp)
+                    ) {
+                        Icon(
+                            imageVector = Icons.Outlined.Forum,
+                            contentDescription = null,
+                            tint = palette.accentPrimary,
+                            modifier = Modifier.size(15.dp)
+                        )
+                        Text(
+                            text = "Отношения: ${stats.relationsSummary}",
+                            style = MaterialTheme.typography.bodySmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                            maxLines = 2,
+                            overflow = TextOverflow.Ellipsis
+                        )
+                    }
+                }
+            }
+        }
+
+        // 4 Universal Hero Skills Card
+        item {
+            Surface(
+                color = MaterialTheme.colorScheme.background.copy(alpha = 0.65f),
+                shape = MaterialTheme.shapes.medium,
+                border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant),
+                modifier = Modifier.fillMaxWidth()
+            ) {
+                Column(
+                    modifier = Modifier.padding(14.dp),
+                    verticalArrangement = Arrangement.spacedBy(10.dp)
+                ) {
+                    Row(
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.spacedBy(6.dp)
+                    ) {
+                        Icon(
+                            imageVector = Icons.Outlined.Shield,
+                            contentDescription = null,
+                            tint = palette.accentPrimary,
+                            modifier = Modifier.size(16.dp)
+                        )
+                        Text(
+                            text = "Характеристики героя",
+                            style = MaterialTheme.typography.titleSmall,
+                            fontWeight = FontWeight.SemiBold
+                        )
+                    }
+                    Text(
+                        text = "Влияют на шансы в рулетке судьбы и реакции мира.",
+                        style = MaterialTheme.typography.labelSmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                    )
+                    SkillType.entries.forEach { skill ->
+                        val level = stats.skills.levelFor(skill)
+                        val barColor = when (skill) {
+                            SkillType.MIGHT -> palette.choiceForceColor
+                            SkillType.STEALTH -> palette.choiceStealthColor
+                            SkillType.INSIGHT -> palette.choiceDiplomacyColor
+                            SkillType.LORE -> palette.choiceWildcardColor
+                        }
+                        Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
+                            Row(
+                                modifier = Modifier.fillMaxWidth(),
+                                horizontalArrangement = Arrangement.SpaceBetween,
+                                verticalAlignment = Alignment.CenterVertically
+                            ) {
+                                Text(
+                                    text = skill.labelRu,
+                                    style = MaterialTheme.typography.labelMedium,
+                                    fontWeight = FontWeight.SemiBold
+                                )
+                                Text(
+                                    text = "$level / 10",
+                                    style = MaterialTheme.typography.labelMedium,
+                                    fontWeight = FontWeight.Bold,
+                                    color = barColor
+                                )
+                            }
+                            LinearProgressIndicator(
+                                progress = { level / 10f },
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .height(6.dp)
+                                    .clip(RoundedCornerShape(999.dp)),
+                                color = barColor,
+                                trackColor = MaterialTheme.colorScheme.outlineVariant
                             )
                         }
                     }
                 }
             }
+        }
 
-            // Visual Inventory Section (every item has its own picture tile!)
-            item {
-                Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                    Text(
-                        text = "Инвентарь (${stats.inventoryItems.size}) — нажмите на предмет",
-                        style = MaterialTheme.typography.titleMedium,
-                        fontWeight = FontWeight.SemiBold
-                    )
-                    if (stats.inventoryItems.isEmpty()) {
-                        Surface(
-                            color = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.5f),
-                            shape = MaterialTheme.shapes.medium,
-                            modifier = Modifier.fillMaxWidth()
-                        ) {
-                            Text(
-                                text = "В карманах пока пусто. Предметы появятся по мере развития истории.",
-                                style = MaterialTheme.typography.bodySmall,
-                                color = MaterialTheme.colorScheme.onSurfaceVariant,
-                                modifier = Modifier.padding(14.dp)
-                            )
-                        }
-                    } else {
-                        Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                            stats.inventoryItems.chunked(2).forEach { pair ->
-                                Row(
-                                    modifier = Modifier.fillMaxWidth(),
-                                    horizontalArrangement = Arrangement.spacedBy(8.dp)
-                                ) {
-                                    pair.forEach { itemName ->
-                                        val spec = remember(itemName) { resolveItemVisualSpec(itemName) }
-                                        Surface(
-                                            color = MaterialTheme.colorScheme.background.copy(alpha = 0.72f),
-                                            shape = MaterialTheme.shapes.medium,
-                                            border = BorderStroke(1.dp, spec.accent.copy(alpha = 0.35f)),
-                                            modifier = Modifier
-                                                .weight(1f)
-                                                .clip(MaterialTheme.shapes.medium)
-                                                .clickable {
-                                                    onItemClick(itemName)
-                                                }
+        // Visual Structured Inventory Section
+        item {
+            Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                Text(
+                    text = "Инвентарь (${stats.structuredInventory.size}) — нажмите на предмет",
+                    style = MaterialTheme.typography.titleMedium,
+                    fontWeight = FontWeight.SemiBold
+                )
+                if (stats.structuredInventory.isEmpty()) {
+                    Surface(
+                        color = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.5f),
+                        shape = MaterialTheme.shapes.medium,
+                        modifier = Modifier.fillMaxWidth()
+                    ) {
+                        Text(
+                            text = "В карманах пока пусто. Предметы появятся по мере развития истории.",
+                            style = MaterialTheme.typography.bodySmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                            modifier = Modifier.padding(14.dp)
+                        )
+                    }
+                } else {
+                    Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                        stats.structuredInventory.chunked(2).forEach { pair ->
+                            Row(
+                                modifier = Modifier.fillMaxWidth(),
+                                horizontalArrangement = Arrangement.spacedBy(8.dp)
+                            ) {
+                                pair.forEach { item ->
+                                    val spec = remember(item.name) { resolveItemVisualSpec(item.name) }
+                                    Surface(
+                                        color = MaterialTheme.colorScheme.background.copy(alpha = 0.72f),
+                                        shape = MaterialTheme.shapes.medium,
+                                        border = BorderStroke(
+                                            width = if (item.isEquipped) 1.5.dp else 1.dp,
+                                            color = if (item.isEquipped) palette.healthHigh else spec.accent.copy(alpha = 0.35f)
+                                        ),
+                                        modifier = Modifier
+                                            .weight(1f)
+                                            .clip(MaterialTheme.shapes.medium)
+                                            .clickable {
+                                                onItemClick(item)
+                                            }
+                                    ) {
+                                        Row(
+                                            modifier = Modifier.padding(10.dp),
+                                            verticalAlignment = Alignment.CenterVertically,
+                                            horizontalArrangement = Arrangement.spacedBy(10.dp)
                                         ) {
-                                            Row(
-                                                modifier = Modifier.padding(10.dp),
-                                                verticalAlignment = Alignment.CenterVertically,
-                                                horizontalArrangement = Arrangement.spacedBy(10.dp)
-                                            ) {
-                                                ItemPictureTile(
-                                                    itemName = itemName,
-                                                    palette = palette,
-                                                    size = 42.dp
+                                            ItemPictureTile(
+                                                itemName = item.name,
+                                                palette = palette,
+                                                size = 42.dp
+                                            )
+                                            Column(modifier = Modifier.weight(1f)) {
+                                                Text(
+                                                    text = if (item.quantity > 1L) "${item.name} ×${item.quantity}" else item.name,
+                                                    style = MaterialTheme.typography.labelMedium,
+                                                    fontWeight = FontWeight.SemiBold,
+                                                    maxLines = 2,
+                                                    overflow = TextOverflow.Ellipsis
                                                 )
-                                                Column(modifier = Modifier.weight(1f)) {
-                                                    Text(
-                                                        text = itemName,
-                                                        style = MaterialTheme.typography.labelMedium,
-                                                        fontWeight = FontWeight.SemiBold,
-                                                        maxLines = 2,
-                                                        overflow = TextOverflow.Ellipsis
-                                                    )
-                                                    Text(
-                                                        text = spec.kind.categoryTitle,
-                                                        style = MaterialTheme.typography.labelSmall,
-                                                        color = MaterialTheme.colorScheme.onSurfaceVariant,
-                                                        maxLines = 1,
-                                                        overflow = TextOverflow.Ellipsis
-                                                    )
-                                                }
+                                                Text(
+                                                    text = buildString {
+                                                        append(item.resolvedCategory().labelRu)
+                                                        if (item.isEquipped) append(" • Экип.")
+                                                    },
+                                                    style = MaterialTheme.typography.labelSmall,
+                                                    color = if (item.isEquipped) palette.healthHigh else MaterialTheme.colorScheme.onSurfaceVariant,
+                                                    maxLines = 1,
+                                                    overflow = TextOverflow.Ellipsis
+                                                )
                                             }
                                         }
                                     }
-                                    if (pair.size == 1) {
-                                        Spacer(modifier = Modifier.weight(1f))
-                                    }
+                                }
+                                if (pair.size == 1) {
+                                    Spacer(modifier = Modifier.weight(1f))
                                 }
                             }
                         }
                     }
                 }
             }
+        }
 
-            item {
-                FilledTonalButton(
-                    onClick = onOpenCodex,
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .height(48.dp)
-                        .testTag("stats_open_codex_button")
-                ) {
-                    Icon(
-                        imageVector = Icons.AutoMirrored.Outlined.MenuBook,
-                        contentDescription = null,
-                        modifier = Modifier.size(18.dp)
-                    )
-                    Spacer(modifier = Modifier.width(8.dp))
-                    Text("Открыть полный Кодекс и досье NPC")
-                }
-            }
-
-            item {
-                Spacer(modifier = Modifier.height(10.dp))
+        item {
+            FilledTonalButton(
+                onClick = onOpenCodex,
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .height(48.dp)
+                    .testTag("stats_open_codex_button")
+            ) {
+                Icon(
+                    imageVector = Icons.AutoMirrored.Outlined.MenuBook,
+                    contentDescription = null,
+                    modifier = Modifier.size(18.dp)
+                )
+                Spacer(modifier = Modifier.width(8.dp))
+                Text("Открыть полный Кодекс и досье NPC")
             }
         }
+
+        item {
+            Spacer(modifier = Modifier.height(10.dp))
+        }
     }
+}

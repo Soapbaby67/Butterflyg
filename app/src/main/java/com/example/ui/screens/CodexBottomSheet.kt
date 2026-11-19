@@ -1,6 +1,9 @@
 package com.example.ui.screens
 
+import androidx.activity.compose.rememberLauncherForActivityResult
+import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.BorderStroke
+import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
@@ -15,18 +18,25 @@ import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.navigationBarsPadding
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.KeyboardActions
 import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Add
 import androidx.compose.material.icons.filled.PushPin
+import androidx.compose.material.icons.outlined.AutoStories
+import androidx.compose.material.icons.outlined.Cancel
 import androidx.compose.material.icons.outlined.CheckCircle
+import androidx.compose.material.icons.outlined.Code
 import androidx.compose.material.icons.outlined.DeleteOutline
+import androidx.compose.material.icons.outlined.Description
 import androidx.compose.material.icons.outlined.Flag
 import androidx.compose.material.icons.outlined.PushPin
+import androidx.compose.material.icons.outlined.RadioButtonUnchecked
 import androidx.compose.material.icons.outlined.Share
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.FilledIconButton
@@ -58,6 +68,7 @@ import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.ImeAction
+import androidx.compose.ui.text.style.TextDecoration
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import com.example.core.ChronicleExporter
@@ -66,7 +77,9 @@ import com.example.core.SfxEvent
 import com.example.data.model.ButterflyEvent
 import com.example.data.model.Campaign
 import com.example.data.model.CampaignTurn
+import com.example.data.model.InventoryItem
 import com.example.data.model.NpcRelation
+import com.example.data.model.QuestStatus
 import com.example.data.repository.PlayerFactNote
 import com.example.ui.components.EmotionBadgeChip
 import com.example.ui.components.ItemPictureTile
@@ -84,7 +97,7 @@ fun CodexBottomSheet(
     onAddFact: (String) -> Unit = {},
     onToggleFactPinned: (String) -> Unit = {},
     onDeleteFact: (String) -> Unit = {},
-    onItemClick: (String) -> Unit = {},
+    onItemClick: (InventoryItem) -> Unit = {},
     onDismiss: () -> Unit
 ) {
     val sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true)
@@ -126,7 +139,7 @@ fun CodexContent(
     onAddFact: (String) -> Unit = {},
     onToggleFactPinned: (String) -> Unit = {},
     onDeleteFact: (String) -> Unit = {},
-    onItemClick: (String) -> Unit = {},
+    onItemClick: (InventoryItem) -> Unit = {},
     modifier: Modifier = Modifier
 ) {
     val tabs = listOf(
@@ -206,16 +219,52 @@ private fun CharacterAndInventoryTab(
     campaign: Campaign,
     turns: List<CampaignTurn>,
     palette: UniverseVisualPalette,
-    onItemClick: (String) -> Unit
+    onItemClick: (InventoryItem) -> Unit
 ) {
     val context = LocalContext.current
     val audio = LocalRpgAudioEngine.current
+    val resolvedQuests = remember(campaign.quests, campaign.activeQuests) {
+        campaign.resolvedQuests()
+    }
+    val resolvedItems = remember(campaign.inventoryItems, campaign.inventory) {
+        campaign.resolvedInventoryItems()
+    }
+    var exportStatus by remember { mutableStateOf<String?>(null) }
+
+    val markdownLauncher = rememberLauncherForActivityResult(
+        contract = ActivityResultContracts.CreateDocument("text/markdown")
+    ) { uri ->
+        if (uri != null) {
+            val content = ChronicleExporter.formatChronicleMarkdown(campaign, turns)
+            val saved = ChronicleExporter.writeTextToUri(context, uri, content)
+            exportStatus = if (saved) {
+                "Хроника сохранена в формате Markdown (.md)."
+            } else {
+                "Не удалось записать файл Markdown."
+            }
+        }
+    }
+
+    val htmlLauncher = rememberLauncherForActivityResult(
+        contract = ActivityResultContracts.CreateDocument("text/html")
+    ) { uri ->
+        if (uri != null) {
+            val content = ChronicleExporter.formatChronicleHtml(campaign, turns)
+            val saved = ChronicleExporter.writeTextToUri(context, uri, content)
+            exportStatus = if (saved) {
+                "Книга хроники сохранена в формате HTML (.html)."
+            } else {
+                "Не удалось записать файл HTML."
+            }
+        }
+    }
+
     LazyColumn(
         contentPadding = PaddingValues(20.dp),
         verticalArrangement = Arrangement.spacedBy(14.dp),
         modifier = Modifier.fillMaxWidth()
     ) {
-        if (campaign.activeQuests.isNotEmpty()) {
+        if (resolvedQuests.isNotEmpty()) {
             item {
                 Surface(
                     color = palette.accentPrimary.copy(alpha = 0.10f),
@@ -227,7 +276,7 @@ private fun CharacterAndInventoryTab(
                 ) {
                     Column(
                         modifier = Modifier.padding(12.dp),
-                        verticalArrangement = Arrangement.spacedBy(6.dp)
+                        verticalArrangement = Arrangement.spacedBy(8.dp)
                     ) {
                         Row(
                             verticalAlignment = Alignment.CenterVertically,
@@ -240,38 +289,116 @@ private fun CharacterAndInventoryTab(
                                 modifier = Modifier.size(16.dp)
                             )
                             Text(
-                                text = "Активные цели и нити сюжета",
+                                text = "Журнал квестов и нитей сюжета",
                                 style = MaterialTheme.typography.titleSmall,
                                 fontWeight = FontWeight.SemiBold,
                                 color = MaterialTheme.colorScheme.onSurface
                             )
                         }
-                        campaign.activeQuests.forEach { quest ->
+                        resolvedQuests.forEach { quest ->
+                            val status = quest.resolvedStatus()
+                            val (statusIcon, statusColor) = when (status) {
+                                QuestStatus.ACTIVE -> Icons.Outlined.RadioButtonUnchecked to palette.accentPrimary
+                                QuestStatus.COMPLETED -> Icons.Outlined.CheckCircle to palette.healthHigh
+                                QuestStatus.FAILED -> Icons.Outlined.Cancel to palette.healthLow
+                            }
                             Row(
                                 verticalAlignment = Alignment.Top,
-                                horizontalArrangement = Arrangement.spacedBy(6.dp)
+                                horizontalArrangement = Arrangement.spacedBy(8.dp),
+                                modifier = Modifier.fillMaxWidth()
                             ) {
                                 Icon(
-                                    imageVector = Icons.Outlined.CheckCircle,
-                                    contentDescription = null,
-                                    tint = palette.accentSecondary,
+                                    imageVector = statusIcon,
+                                    contentDescription = status.labelRu,
+                                    tint = statusColor,
                                     modifier = Modifier
                                         .padding(top = 2.dp)
-                                        .size(14.dp)
+                                        .size(15.dp)
                                 )
-                                Text(
-                                    text = quest,
-                                    style = MaterialTheme.typography.bodySmall,
-                                    color = MaterialTheme.colorScheme.onSurface
-                                )
+                                Column(modifier = Modifier.weight(1f)) {
+                                    Text(
+                                        text = quest.title,
+                                        style = MaterialTheme.typography.bodySmall.copy(
+                                            textDecoration = if (status == QuestStatus.COMPLETED) {
+                                                TextDecoration.LineThrough
+                                            } else {
+                                                TextDecoration.None
+                                            }
+                                        ),
+                                        color = if (status == QuestStatus.ACTIVE) {
+                                            MaterialTheme.colorScheme.onSurface
+                                        } else {
+                                            MaterialTheme.colorScheme.onSurfaceVariant
+                                        }
+                                    )
+                                    val turnBadge = if (quest.updatedAtTurn > 0L) " • Ход ${quest.updatedAtTurn}" else ""
+                                    Text(
+                                        text = "${status.labelRu}$turnBadge",
+                                        style = MaterialTheme.typography.labelSmall,
+                                        color = statusColor
+                                    )
+                                }
                             }
                         }
                     }
                 }
             }
         }
+
+        if (campaign.chapterSummaries.isNotEmpty()) {
+            item {
+                Surface(
+                    color = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.45f),
+                    shape = MaterialTheme.shapes.medium,
+                    border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant),
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .testTag("codex_chapter_archive_card")
+                ) {
+                    Column(
+                        modifier = Modifier.padding(12.dp),
+                        verticalArrangement = Arrangement.spacedBy(6.dp)
+                    ) {
+                        Row(
+                            verticalAlignment = Alignment.CenterVertically,
+                            horizontalArrangement = Arrangement.spacedBy(6.dp)
+                        ) {
+                            Icon(
+                                imageVector = Icons.Outlined.AutoStories,
+                                contentDescription = null,
+                                tint = palette.accentSecondary,
+                                modifier = Modifier.size(16.dp)
+                            )
+                            Text(
+                                text = "Архив глав (${campaign.chapterSummaries.size})",
+                                style = MaterialTheme.typography.titleSmall,
+                                fontWeight = FontWeight.SemiBold,
+                                color = MaterialTheme.colorScheme.onSurface
+                            )
+                        }
+                        campaign.chapterSummaries.forEachIndexed { idx, summary ->
+                            Text(
+                                text = "${idx + 1}. $summary",
+                                style = MaterialTheme.typography.bodySmall,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant
+                            )
+                        }
+                    }
+                }
+            }
+        }
+
         item {
-            CodexInfoBlock(title = "Персонаж", body = campaign.characterSummary)
+            val heroHeader = buildString {
+                if (campaign.playerName.isNotBlank()) {
+                    append(campaign.playerName)
+                    append(" (")
+                    append(campaign.resolvedGender().labelRu)
+                    append(")\n")
+                }
+                append(campaign.characterSummary)
+            }
+            CodexInfoBlock(title = "Персонаж", body = heroHeader)
         }
         item {
             CodexInfoBlock(title = "Точка старта", body = campaign.startingPoint)
@@ -279,26 +406,84 @@ private fun CharacterAndInventoryTab(
         item {
             CodexInfoBlock(title = "Тон и правила", body = campaign.toneAndDifficulty)
         }
+
         item {
-            OutlinedButton(
-                onClick = {
-                    audio?.playSfx(SfxEvent.UI_TAP)
-                    ChronicleExporter.shareChronicle(context, campaign, turns)
-                },
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .minimumInteractiveComponentSize()
-                    .testTag("share_chronicle_button")
-            ) {
-                Icon(
-                    imageVector = Icons.Outlined.Share,
-                    contentDescription = null,
-                    modifier = Modifier.size(18.dp)
-                )
-                Spacer(modifier = Modifier.size(8.dp))
-                Text("Поделиться хроникой как книгой")
+            Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                OutlinedButton(
+                    onClick = {
+                        audio?.playSfx(SfxEvent.UI_TAP)
+                        ChronicleExporter.shareChronicle(context, campaign, turns)
+                    },
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .minimumInteractiveComponentSize()
+                        .testTag("share_chronicle_button")
+                ) {
+                    Icon(
+                        imageVector = Icons.Outlined.Share,
+                        contentDescription = null,
+                        modifier = Modifier.size(18.dp)
+                    )
+                    Spacer(modifier = Modifier.size(8.dp))
+                    Text("Поделиться текстом")
+                }
+
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.spacedBy(8.dp)
+                ) {
+                    OutlinedButton(
+                        onClick = {
+                            audio?.playSfx(SfxEvent.UI_TAP)
+                            markdownLauncher.launch(
+                                ChronicleExporter.suggestedFileName(campaign, "md")
+                            )
+                        },
+                        modifier = Modifier
+                            .weight(1f)
+                            .minimumInteractiveComponentSize()
+                            .testTag("export_markdown_button")
+                    ) {
+                        Icon(
+                            imageVector = Icons.Outlined.Description,
+                            contentDescription = null,
+                            modifier = Modifier.size(16.dp)
+                        )
+                        Spacer(modifier = Modifier.width(6.dp))
+                        Text("Сохранить .md", maxLines = 1, overflow = TextOverflow.Ellipsis)
+                    }
+                    OutlinedButton(
+                        onClick = {
+                            audio?.playSfx(SfxEvent.UI_TAP)
+                            htmlLauncher.launch(
+                                ChronicleExporter.suggestedFileName(campaign, "html")
+                            )
+                        },
+                        modifier = Modifier
+                            .weight(1f)
+                            .minimumInteractiveComponentSize()
+                            .testTag("export_html_button")
+                    ) {
+                        Icon(
+                            imageVector = Icons.Outlined.Code,
+                            contentDescription = null,
+                            modifier = Modifier.size(16.dp)
+                        )
+                        Spacer(modifier = Modifier.width(6.dp))
+                        Text("Сохранить .html", maxLines = 1, overflow = TextOverflow.Ellipsis)
+                    }
+                }
+
+                if (!exportStatus.isNullOrBlank()) {
+                    Text(
+                        text = exportStatus!!,
+                        style = MaterialTheme.typography.labelSmall,
+                        color = palette.accentPrimary
+                    )
+                }
             }
         }
+
         item {
             Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
                 Text(
@@ -306,7 +491,7 @@ private fun CharacterAndInventoryTab(
                     style = MaterialTheme.typography.titleMedium,
                     color = MaterialTheme.colorScheme.onSurface
                 )
-                if (campaign.inventory.isEmpty()) {
+                if (resolvedItems.isEmpty()) {
                     Text(
                         text = "Инвентарь пока пуст.",
                         style = MaterialTheme.typography.bodyMedium,
@@ -317,14 +502,25 @@ private fun CharacterAndInventoryTab(
                         horizontalArrangement = Arrangement.spacedBy(8.dp),
                         verticalArrangement = Arrangement.spacedBy(8.dp)
                     ) {
-                        campaign.inventory.forEach { itemName ->
+                        resolvedItems.forEach { item ->
                             Surface(
-                                color = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.78f),
+                                color = if (item.isEquipped) {
+                                    palette.healthHigh.copy(alpha = 0.14f)
+                                } else {
+                                    MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.78f)
+                                },
                                 shape = MaterialTheme.shapes.medium,
-                                border = BorderStroke(1.dp, palette.accentPrimary.copy(alpha = 0.35f)),
+                                border = BorderStroke(
+                                    width = if (item.isEquipped) 1.4.dp else 1.dp,
+                                    color = if (item.isEquipped) {
+                                        palette.healthHigh.copy(alpha = 0.65f)
+                                    } else {
+                                        palette.accentPrimary.copy(alpha = 0.35f)
+                                    }
+                                ),
                                 modifier = Modifier
                                     .clip(MaterialTheme.shapes.medium)
-                                    .clickable { onItemClick(itemName) }
+                                    .clickable { onItemClick(item) }
                             ) {
                                 Row(
                                     verticalAlignment = Alignment.CenterVertically,
@@ -332,14 +528,23 @@ private fun CharacterAndInventoryTab(
                                     modifier = Modifier.padding(start = 6.dp, end = 12.dp, top = 6.dp, bottom = 6.dp)
                                 ) {
                                     ItemPictureTile(
-                                        itemName = itemName,
+                                        itemName = item.name,
                                         palette = palette,
                                         size = 30.dp
                                     )
+                                    val qtySuffix = if (item.quantity > 1L) " ×${item.quantity}" else ""
                                     Text(
-                                        text = itemName,
+                                        text = "${item.name}$qtySuffix",
                                         style = MaterialTheme.typography.bodyMedium
                                     )
+                                    if (item.isEquipped) {
+                                        Box(
+                                            modifier = Modifier
+                                                .size(7.dp)
+                                                .clip(CircleShape)
+                                                .background(palette.healthHigh)
+                                        )
+                                    }
                                 }
                             }
                         }
@@ -521,6 +726,24 @@ private fun PlayerFactsTab(
     }
 }
 
+private val relationshipStages = listOf(
+    "Вражда",
+    "Настороженность",
+    "Незнакомец",
+    "Осторожный интерес",
+    "Доверие",
+    "Союзник / Романтика"
+)
+
+private fun relationshipStageIndex(trustLevel: Long): Int = when {
+    trustLevel <= -50L -> 0
+    trustLevel <= -15L -> 1
+    trustLevel < 15L -> 2
+    trustLevel < 45L -> 3
+    trustLevel < 75L -> 4
+    else -> 5
+}
+
 @Composable
 private fun NpcRelationsTab(
     npcs: List<NpcRelation>,
@@ -549,6 +772,8 @@ private fun NpcRelationsTab(
         modifier = Modifier.fillMaxWidth()
     ) {
         items(npcs) { npc ->
+            val stageIdx = relationshipStageIndex(npc.trustLevel)
+            val stageColor = if (npc.trustLevel >= 0L) palette.trustPositive else palette.trustNegative
             Surface(
                 color = MaterialTheme.colorScheme.background,
                 shape = MaterialTheme.shapes.medium,
@@ -597,34 +822,46 @@ private fun NpcRelationsTab(
                         }
                     }
 
-                    Row(
-                        modifier = Modifier.fillMaxWidth(),
-                        verticalAlignment = Alignment.CenterVertically,
-                        horizontalArrangement = Arrangement.spacedBy(10.dp)
-                    ) {
-                        Text(
-                            text = npc.statusLabel.ifBlank { "Нейтралитет" },
-                            style = MaterialTheme.typography.labelMedium,
-                            color = palette.accentPrimary
-                        )
-                        val normalizedTrust = ((npc.trustLevel + 100L).coerceIn(0L, 200L)) / 200f
-                        LinearProgressIndicator(
-                            progress = { normalizedTrust },
-                            modifier = Modifier
-                                .weight(1f)
-                                .height(6.dp)
-                                .clip(RoundedCornerShape(999.dp)),
-                            color = if (npc.trustLevel >= 0L) {
-                                palette.trustPositive
-                            } else {
-                                palette.trustNegative
-                            },
-                            trackColor = MaterialTheme.colorScheme.outlineVariant
-                        )
-                        Text(
-                            text = if (npc.trustLevel > 0) "+${npc.trustLevel}" else "${npc.trustLevel}",
-                            style = MaterialTheme.typography.labelSmall
-                        )
+                    // Visual Relationship Stage Progression Scale
+                    Column(verticalArrangement = Arrangement.spacedBy(5.dp)) {
+                        Row(
+                            modifier = Modifier.fillMaxWidth(),
+                            horizontalArrangement = Arrangement.SpaceBetween,
+                            verticalAlignment = Alignment.CenterVertically
+                        ) {
+                            Text(
+                                text = "Стадия: ${relationshipStages[stageIdx]}",
+                                style = MaterialTheme.typography.labelMedium,
+                                fontWeight = FontWeight.SemiBold,
+                                color = stageColor
+                            )
+                            Text(
+                                text = "${npc.statusLabel.ifBlank { "Нейтралитет" }} (${if (npc.trustLevel > 0) "+${npc.trustLevel}" else "${npc.trustLevel}"})",
+                                style = MaterialTheme.typography.labelSmall,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant
+                            )
+                        }
+                        Row(
+                            modifier = Modifier.fillMaxWidth(),
+                            horizontalArrangement = Arrangement.spacedBy(4.dp)
+                        ) {
+                            relationshipStages.indices.forEach { idx ->
+                                val filled = idx <= stageIdx
+                                Box(
+                                    modifier = Modifier
+                                        .weight(1f)
+                                        .height(6.dp)
+                                        .clip(RoundedCornerShape(999.dp))
+                                        .background(
+                                            if (filled) {
+                                                stageColor.copy(alpha = if (idx == stageIdx) 1f else 0.55f)
+                                            } else {
+                                                MaterialTheme.colorScheme.outlineVariant
+                                            }
+                                        )
+                                )
+                            }
+                        }
                     }
 
                     if (npc.personality.isNotBlank()) {
@@ -640,6 +877,32 @@ private fun NpcRelationsTab(
                             style = MaterialTheme.typography.bodySmall,
                             color = MaterialTheme.colorScheme.onSurfaceVariant
                         )
+                    }
+                    if (npc.recentActions.isNotEmpty()) {
+                        Surface(
+                            color = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.45f),
+                            shape = RoundedCornerShape(8.dp),
+                            modifier = Modifier.fillMaxWidth()
+                        ) {
+                            Column(
+                                modifier = Modifier.padding(horizontal = 10.dp, vertical = 8.dp),
+                                verticalArrangement = Arrangement.spacedBy(3.dp)
+                            ) {
+                                Text(
+                                    text = "Запомнил поступки игрока",
+                                    style = MaterialTheme.typography.labelSmall,
+                                    fontWeight = FontWeight.SemiBold,
+                                    color = palette.accentPrimary
+                                )
+                                npc.recentActions.takeLast(3).forEach { entry ->
+                                    Text(
+                                        text = "• $entry",
+                                        style = MaterialTheme.typography.bodySmall,
+                                        color = MaterialTheme.colorScheme.onSurface
+                                    )
+                                }
+                            }
+                        }
                     }
                 }
             }

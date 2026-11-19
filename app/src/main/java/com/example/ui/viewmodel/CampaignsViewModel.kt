@@ -47,6 +47,9 @@ class CampaignsViewModel(
     private val _deleteError = MutableStateFlow<String?>(null)
     val deleteError: StateFlow<String?> = _deleteError.asStateFlow()
 
+    private val _forkingCampaignId = MutableStateFlow<String?>(null)
+    val forkingCampaignId: StateFlow<String?> = _forkingCampaignId.asStateFlow()
+
     fun deleteCampaign(campaignId: String) {
         viewModelScope.launch {
             _deleteError.value = null
@@ -57,6 +60,31 @@ class CampaignsViewModel(
             } catch (e: Exception) {
                 Log.e(TAG, "Failed to delete campaign $campaignId", e)
                 _deleteError.value = e.localizedMessage ?: "Не удалось удалить хронику."
+            }
+        }
+    }
+
+    fun forkCampaign(
+        campaign: Campaign,
+        onForked: (String) -> Unit
+    ) {
+        if (_forkingCampaignId.value != null) return
+        viewModelScope.launch {
+            _forkingCampaignId.value = campaign.id
+            _deleteError.value = null
+            try {
+                val forkedId = repository.duplicateCampaignAtTurn(
+                    sourceCampaignId = campaign.id,
+                    upToTurnNumber = campaign.turnCount.coerceAtLeast(1L)
+                )
+                onForked(forkedId)
+            } catch (e: CancellationException) {
+                throw e
+            } catch (e: Exception) {
+                Log.e(TAG, "Failed to fork campaign ${campaign.id}", e)
+                _deleteError.value = e.localizedMessage ?: "Не удалось создать ветку хроники."
+            } finally {
+                _forkingCampaignId.value = null
             }
         }
     }

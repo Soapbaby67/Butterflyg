@@ -31,6 +31,7 @@ import androidx.compose.material.icons.outlined.GraphicEq
 import androidx.compose.material.icons.outlined.LightMode
 import androidx.compose.material.icons.outlined.MusicNote
 import androidx.compose.material.icons.outlined.RadioButtonUnchecked
+import androidx.compose.material.icons.outlined.RecordVoiceOver
 import androidx.compose.material.icons.outlined.Speed
 import androidx.compose.material.icons.outlined.Tonality
 import androidx.compose.material.icons.outlined.Vibration
@@ -58,6 +59,7 @@ import androidx.compose.ui.unit.sp
 import com.example.core.LocalRpgAudioEngine
 import com.example.core.SfxEvent
 import com.example.data.repository.AiModelChoice
+import com.example.data.repository.NarrativePace
 import com.example.data.repository.PaperThemeMode
 import com.example.data.repository.ReadingFontScale
 import com.example.data.repository.ReadingFontStyle
@@ -73,7 +75,9 @@ fun SettingsBottomSheet(
     onSelectFontStyle: (ReadingFontStyle) -> Unit,
     onSelectFontScale: (ReadingFontScale) -> Unit,
     onSelectAiModel: (AiModelChoice) -> Unit,
+    onSelectNarrativePace: (NarrativePace) -> Unit = {},
     onToggleLiveStreaming: (Boolean) -> Unit,
+    onToggleAutoReadTts: (Boolean) -> Unit = {},
     onToggleHaptics: (Boolean) -> Unit,
     onToggleSound: (Boolean) -> Unit = {},
     onOstVolumeChange: (Float) -> Unit = {},
@@ -292,6 +296,70 @@ fun SettingsBottomSheet(
 
             HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant)
 
+            // 3b. AI Narrative Pace Selector
+            SettingsSectionHeader(title = "Темп повествования ИИ")
+            Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                NarrativePace.entries.forEach { pace ->
+                    val selected = settings.narrativePace == pace
+                    Surface(
+                        color = if (selected) {
+                            MaterialTheme.colorScheme.secondaryContainer.copy(alpha = 0.45f)
+                        } else {
+                            MaterialTheme.colorScheme.background
+                        },
+                        shape = MaterialTheme.shapes.medium,
+                        border = BorderStroke(
+                            width = if (selected) 1.5.dp else 1.dp,
+                            color = if (selected) {
+                                MaterialTheme.colorScheme.secondary
+                            } else {
+                                MaterialTheme.colorScheme.outlineVariant
+                            }
+                        ),
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .clip(MaterialTheme.shapes.medium)
+                            .clickable { onSelectNarrativePace(pace) }
+                            .testTag("settings_pace_${pace.key}")
+                    ) {
+                        Row(
+                            modifier = Modifier.padding(horizontal = 14.dp, vertical = 10.dp),
+                            verticalAlignment = Alignment.CenterVertically,
+                            horizontalArrangement = Arrangement.spacedBy(12.dp)
+                        ) {
+                            Icon(
+                                imageVector = if (selected) {
+                                    Icons.Outlined.CheckCircle
+                                } else {
+                                    Icons.Outlined.RadioButtonUnchecked
+                                },
+                                contentDescription = null,
+                                tint = if (selected) {
+                                    MaterialTheme.colorScheme.secondary
+                                } else {
+                                    MaterialTheme.colorScheme.onSurfaceVariant
+                                }
+                            )
+                            Column(modifier = Modifier.weight(1f)) {
+                                Text(
+                                    text = pace.labelRu,
+                                    style = MaterialTheme.typography.titleSmall,
+                                    fontWeight = FontWeight.SemiBold,
+                                    color = MaterialTheme.colorScheme.onSurface
+                                )
+                                Text(
+                                    text = pace.subtitleRu,
+                                    style = MaterialTheme.typography.bodySmall,
+                                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                                )
+                            }
+                        }
+                    }
+                }
+            }
+
+            HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant)
+
             // 4. Streaming, Sound & Haptics
             SettingsSectionHeader(title = "Саундтрек и звуки")
             if (activeSoundscapeLabel.isNotBlank()) {
@@ -420,6 +488,14 @@ fun SettingsBottomSheet(
                 checked = settings.liveStreamingEnabled,
                 onCheckedChange = onToggleLiveStreaming,
                 testTag = "settings_streaming_switch"
+            )
+            SettingsSwitchRow(
+                icon = Icons.Outlined.RecordVoiceOver,
+                title = "Авточтение новых ответов (TTS)",
+                subtitle = "Автоматически озвучивать новые сцены мастером, приглушая OST",
+                checked = settings.autoReadTtsEnabled,
+                onCheckedChange = onToggleAutoReadTts,
+                testTag = "settings_tts_autoread_switch"
             )
             SettingsSwitchRow(
                 icon = Icons.Outlined.Vibration,

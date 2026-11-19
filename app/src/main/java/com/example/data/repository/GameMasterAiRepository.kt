@@ -5,10 +5,17 @@ import com.example.data.model.ButterflyEvent
 import com.example.data.model.Campaign
 import com.example.data.model.CampaignTurn
 import com.example.data.model.EmotionCategory
+import com.example.data.model.HeroSkills
+import com.example.data.model.InventoryItem
+import com.example.data.model.ItemCategory
 import com.example.data.model.NpcEmotionSnapshot
 import com.example.data.model.NpcRelation
+import com.example.data.model.PlayerGender
+import com.example.data.model.QuestEntry
+import com.example.data.model.QuestStatus
 import com.example.data.model.RiskOutcome
 import com.example.data.model.RiskOutcomeTier
+import com.example.data.model.ScenarioGenre
 import com.example.data.model.SessionSetupInput
 import com.example.data.model.TurnChoice
 import com.google.firebase.Firebase
@@ -23,6 +30,7 @@ import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.TimeoutCancellationException
 import kotlinx.coroutines.withTimeout
 import org.json.JSONObject
+import java.util.concurrent.ConcurrentHashMap
 
 class StreamingNarrativeExtractor {
     private enum class State {
@@ -243,6 +251,18 @@ object NpcTrustGuardrail {
         val resolvedPersonality = incoming.personality.ifBlank { previous?.personality.orEmpty() }
         val resolvedBoundaries = incoming.boundaries.ifBlank { previous?.boundaries.orEmpty() }
 
+        val mergedActions = buildList {
+            previous?.recentActions?.forEach { action ->
+                if (action.isNotBlank()) add(action.trim())
+            }
+            incoming.recentActions.forEach { action ->
+                val clean = action.trim()
+                if (clean.isNotBlank() && none { it.equals(clean, ignoreCase = true) }) {
+                    add(clean)
+                }
+            }
+        }.takeLast(3)
+
         val rawStatus = incoming.statusLabel.ifBlank { previous?.statusLabel.orEmpty() }
         val lowerStatus = rawStatus.lowercase()
         val resolvedStatus = if (
@@ -268,10 +288,17 @@ object NpcTrustGuardrail {
             statusLabel = resolvedStatus,
             archetype = resolvedArchetype,
             personality = resolvedPersonality,
-            boundaries = resolvedBoundaries
+            boundaries = resolvedBoundaries,
+            recentActions = mergedActions
         )
     }
 }
+
+private data class ModelCacheKey(
+    val model: AiModelChoice,
+    val pace: NarrativePace,
+    val reroll: Boolean
+)
 
 class GameMasterAiRepository(
     private val debugTokenProvider: () -> String? = { null },
@@ -279,6 +306,8 @@ class GameMasterAiRepository(
 ) {
     @Volatile
     private var flash38CooldownUntilMs: Long = 0L
+
+    private val modelCache = ConcurrentHashMap<ModelCacheKey, GenerativeModel>()
 
     private val emotionCategories = listOf(
         "joy",
@@ -315,10 +344,24 @@ class GameMasterAiRepository(
         "creature"
     )
 
+    private val itemCategories = listOf(
+        "weapon",
+        "gear",
+        "consumable",
+        "clue",
+        "key_item"
+    )
+
+    private val questStatuses = listOf(
+        "active",
+        "completed",
+        "failed"
+    )
+
     private val turnResponseSchema = Schema.obj(
         properties = mapOf(
             "narrative" to Schema.string(
-                description = "2-4 ярких абзаца повествования на русском языке, строго без описания мыслей, слов или действий игрока (Anti-Godmodding)."
+                description = "Повествование на русском языке в выбранном темпе, строго без описания мыслей, слов или действий игрока (Anti-Godmodding)."
             ),
             "hudLocation" to Schema.string(description = "Текущая локация для HUD"),
             "hudTime" to Schema.string(description = "Текущее внутриигровое время и погода для HUD"),
@@ -327,8 +370,9 @@ class GameMasterAiRepository(
                 description = "Визуальное настроение/погода сцены для фона"
             ),
             "healthPercent" to Schema.integer(description = "Здоровье или ресурс сил героя в процентах от 0 до 100"),
-            "healthStatus" to Schema.string(description = "Краткое состояние героя (2-3 слова), например: В норме, Ранен, Утомлён, Влюблён"),
-            "currencyLabel" to Schema.string(description = "Текущие деньги или ресурс (например: 15 крон, 300 эдди, 2400 ₽) или пустая строка"),
+            "healthStatus" to Schema.string(description = "Краткое состояние героя (2-3 слова), например: В норме, Ранен, Утомлён"),
+            "currencyAmount" to Schema.integer(description = "Числовое количество валюты/ресурса у героя (например: 15, 300, 0)"),
+            "currencyLabel" to Schema.string(description = "Подпись валюты с числом или единицей (например: 15 крон, 300 эдди, 2400 ₽) или пустая строка"),
             "hudStatusAndInventory" to Schema.string(description = "Краткое состояние персонажа для HUD"),
             "hudRelationsAndCanon" to Schema.string(description = "Краткий статус отношений и влияния на канон для HUD"),
             "canonDeviationPercent" to Schema.integer(description = "Оценка отклонения от канона/привычного уклада от 0 до 100"),
@@ -351,21 +395,37 @@ class GameMasterAiRepository(
             ),
             "inventory" to Schema.array(
                 items = Schema.string(),
-                description = "Актуальный список предметов в инвентаре игрока"
+                description = "Актуальный список названий предметов в инвентаре игрока"
+            ),
+            "inventoryItems" to Schema.array(
+                items = Schema.obj(
+                    properties = mapOf(
+                        "id" to Schema.string(description = "Короткий id предмета латиницей"),
+                        "name" to Schema.string(description = "Название предмета на русском"),
+                        "category" to Schema.enumeration(values = itemCategories),
+                        "quantity" to Schema.integer(description = "Количество (обычно 1)"),
+                        "isEquipped" to Schema.boolean(description = "true, если предмет надет/в руках"),
+                        "description" to Schema.string(description = "Короткое описание предмета (до 120 символов)")
+                    ),
+                    optionalProperties = listOf("id", "quantity", "isEquipped", "description")
+                ),
+                description = "Структурированный инвентарь героя с категориями, количеством и описанием"
             ),
             "npcs" to Schema.array(
                 items = Schema.obj(
                     properties = mapOf(
                         "name" to Schema.string(),
                         "role" to Schema.string(),
-                        "trustLevel" to Schema.integer(description = "От -100 до 100. Меняется плавно: +2..+10 за искренний удачный шаг, при навязчивости или нарушении границ падает."),
+                        "trustLevel" to Schema.integer(description = "От -100 до 100. Меняется плавно: +2..+10 за искренний удачный шаг, при навязчивости падает."),
                         "statusLabel" to Schema.string(),
                         "lastEmotion" to Schema.string(),
                         "lastEmotionCategory" to Schema.enumeration(values = emotionCategories),
                         "archetype" to Schema.enumeration(values = npcArchetypes),
-                        "personality" to Schema.string(description = "Короткий психологический портрет: характер, гордость, комплексы или скрытый мотив (до 120 символов)"),
-                        "boundaries" to Schema.string(description = "Личные границы и красные линии NPC: на чём он отказывает, отстраняется или злится (до 120 символов)")
-                    )
+                        "personality" to Schema.string(description = "Короткий психологический портрет (до 120 символов)"),
+                        "boundaries" to Schema.string(description = "Личные границы и красные линии NPC (до 120 символов)"),
+                        "recentAction" to Schema.string(description = "1 короткая запись (до 100 символов) о последнем поступке игрока, который запомнил этот NPC")
+                    ),
+                    optionalProperties = listOf("recentAction")
                 ),
                 description = "Актуальный список ключевых встреченных NPC, их характеров, личных границ и отношений с игроком"
             ),
@@ -373,10 +433,23 @@ class GameMasterAiRepository(
             "butterflyEventTitle" to Schema.string(description = "Короткий заголовок события эффекта бабочки (или пустая строка)"),
             "butterflyEventConsequence" to Schema.string(description = "Описание долгосрочного последствия для сюжета"),
             "butterflyEventImpact" to Schema.enumeration(values = listOf("minor", "major", "critical")),
-            "storySummary" to Schema.string(description = "Обновлённое краткое резюме сюжета кампании (2-5 предложений)"),
+            "storySummary" to Schema.string(description = "Обновлённое краткое резюме текущей арки кампании (2-5 предложений)"),
+            "chapterArchiveSummary" to Schema.string(description = "Заполняй ТОЛЬКО когда запрошена архивация главы (каждый 10-й ход): 2-3 предложения с итогами прошедших 10 ходов"),
+            "stateChangeSummary" to Schema.string(description = "Краткая сводка изменений за этот ход (доверие, предметы, раны, квесты — до 150 символов)"),
             "activeQuests" to Schema.array(
                 items = Schema.string(),
-                description = "1-3 актуальные цели/зацепки героя на текущий момент (коротко, до 90 символов)"
+                description = "1-3 актуальные цели/зацепки героя на текущий момент"
+            ),
+            "quests" to Schema.array(
+                items = Schema.obj(
+                    properties = mapOf(
+                        "id" to Schema.string(),
+                        "title" to Schema.string(description = "Формулировка цели до 100 символов"),
+                        "status" to Schema.enumeration(values = questStatuses)
+                    ),
+                    optionalProperties = listOf("id")
+                ),
+                description = "Структурированный трекер квестов со статусами active, completed, failed"
             ),
             "choices" to Schema.array(
                 items = Schema.obj(
@@ -403,7 +476,33 @@ class GameMasterAiRepository(
                 description = "3 или 4 принципиально разных варианта действий игрока"
             )
         ),
-        optionalProperties = listOf("currencyLabel", "activeNpcArchetype", "sceneWeather", "activeQuests")
+        optionalProperties = listOf(
+            "currencyAmount",
+            "currencyLabel",
+            "activeNpcArchetype",
+            "sceneWeather",
+            "activeQuests",
+            "quests",
+            "inventoryItems",
+            "chapterArchiveSummary",
+            "stateChangeSummary"
+        )
+    )
+
+    private val premiseSchema = Schema.obj(
+        properties = mapOf(
+            "title" to Schema.string(description = "Атмосферное название хроники (2-5 слов)"),
+            "universe" to Schema.string(description = "Описание мира/вселенной (1 предложение)"),
+            "playerName" to Schema.string(description = "Имя героя"),
+            "playerGender" to Schema.enumeration(values = listOf("male", "female", "neutral")),
+            "characterSummary" to Schema.string(description = "Краткий образ героя, его профессия, сильная сторона и слабость"),
+            "startingPoint" to Schema.string(description = "Яркая стартовая точка, место и завязка конфликта"),
+            "toneAndDifficulty" to Schema.string(description = "Атмосфера, жанровый тон и цена решений"),
+            "might" to Schema.integer(description = "Натиск 1-10"),
+            "stealth" to Schema.integer(description = "Скрытность 1-10"),
+            "insight" to Schema.integer(description = "Проницательность 1-10"),
+            "lore" to Schema.integer(description = "Эрудиция 1-10")
+        )
     )
 
     private val systemPrompt = content {
@@ -413,71 +512,113 @@ class GameMasterAiRepository(
 
             СТРОГИЕ ПРАВИЛА ИГРЫ:
             1. Никакого контроля над игроком (Anti-Godmodding): описывай только мир, окружение, действия и реплики NPC, а также последствия поступков игрока. НИКОГДА не описывай мысли, чувства, слова или будущие действия за игрока. Останавливай повествование ровно в момент, когда требуется решение игрока.
-            2. ПСИХОЛОГИЯ, СОПРОТИВЛЕНИЕ И ЛИЧНЫЕ ГРАНИЦЫ NPC (КРИТИЧЕСКИ ВАЖНО):
+            2. РОД И ИМЯ ГЕРОЯ: строго соблюдай указанные в контексте имя и грамматический род героя (мужской / женский / нейтральный). Никогда не меняй и не путай род глаголов и прилагательных, обращённых к герою или описывающих его прошлое действие.
+            3. ПСИХОЛОГИЯ, СОПРОТИВЛЕНИЕ И ЛИЧНЫЕ ГРАНИЦЫ NPC (КРИТИЧЕСКИ ВАЖНО):
                - Запрещено мгновенное угождение: в романтике и повседневности NPC НЕ влюбляются, НЕ краснеют от первого же комплимента и НЕ соглашаются на просьбы с 1–3 сообщения. У каждого персонажа есть свои дела, смена, усталость, гордость, скепсис, комплексы и личные заботы.
                - Жёсткие личные границы и право на отказ: если игрок форсирует сближение, давит, льстит слишком очевидно, нарушает личное пространство, просит об одолжении без доверия или хамит — NPC обязан отказать, отшутиться с дистанцией, перевести тему, поставить границу или раздражённо отстраниться, снизив trustLevel.
-               - Медленный слоубёрн: незнакомец стартует с trustLevel около -10..+15. Один удачный разговор даёт +2..+8, не больше. Настоящая симпатия и доверие зарабатываются постепенно через множество сцен, поступков и преодоление трений характеров.
-               - Обязательно задавай каждому важному NPC поля "personality" и "boundaries" в JSON при знакомстве и строго придерживайся их дальше.
-            3. Жанр и реализм: строго придерживайся выбранного тона. В боевом или мрачном сеттинге — нет сюжетной брони, ошибки ведут к травмам. В романтике и повседневной рутине — не выдумывай искусственные катастрофы на пустом месте; делай ставку на живые диалоги, бытовые детали, бюджет, неловкие паузы и конфликт интересов.
-            4. Эффект бабочки и цели: любое вмешательство или слово игрока способно необратимо изменить сюжет или отношения. Персонажи помнят прошлые промахи и удачи. Веди 1–3 текущие цели в "activeQuests".
-            5. Динамика и темп: пиши ярко, литературно, живо, но без «воды». 2–4 выразительных абзаца в каждом ходе. В JSON-ответе ВСЕГДА первым полем выдавай "narrative", чтобы игрок сразу видел живой текст.
-            6. Эмоции NPC: при любом контакте с персонажем обязательно заполняй activeNpc (hasActiveNpc = true), указывая его точную эмоцию (например: Скепсис, Раздражение, Сдержанная улыбка, Смущение, Усталость, Подозрение, Теплота), интенсивность (1–5) и краткое наблюдение за мимикой/взглядом/интонацией.
-            7. Предметы и контекст: если игрок использует или показывает предмет из инвентаря, обязательно учитывай этот предмет в сцене и при необходимости обновляй инвентарь. Обязательно учитывай блок «ЗАКРЕПЛЁННЫЕ ФАКТЫ ИГРОКА», если он передан.
-            8. Варианты действий и рискованные развилки: всегда предлагай 3–4 принципиально разных варианта с подходящими к жанру тегами подхода (Силовой, Дипломатический, Скрытный, Нестандартный, Романтический, Заботливый, Бытовой, Эмоциональный, Дерзкий). Для 1–2 рискованных/дерзких/скрытных вариантов ставь "isRisky": true и заполняй 3–4 исхода в "riskOutcomes" (triumph, mixed, setback, twist). Если в действии игрока есть блок «[Бросок судьбы • ...]» — строй сцену строго по выпавшему исходу!
-            9. Язык: весь ответ исключительно на русском языке (кроме перечислений enum, требуемых схемой).
+               - Медленный слоубёрн: незнакомец стартует с trustLevel около -10..+15. Один удачный разговор даёт +2..+8, не больше.
+               - Обязательно задавай каждому важному NPC поля "personality", "boundaries" и "recentAction" (что именно он запомнил из поступков игрока).
+            4. Жанр, навыки и реализм: строго придерживайся выбранного тона и учитывай 4 навыка героя (Натиск, Скрытность, Проницательность, Эрудиция) и его экипировку.
+            5. Эффект бабочки, структурированный инвентарь и квесты:
+               - Заполняй "inventoryItems" с категориями (weapon, gear, consumable, clue, key_item), количеством и флагом isEquipped, дублируя названия в "inventory".
+               - Обновляй "quests" со статусами active, completed или failed.
+               - Обязательно указывай числовые "healthPercent" (0..100) и "currencyAmount" + "currencyLabel".
+            6. Динамика и темп: следуй указанному в запросе темпу повествования (Динамичный / Книжный / Глубокий). В JSON-ответе ВСЕГДА первым полем выдавай "narrative", чтобы игрок сразу видел живой текст.
+            7. Эмоции NPC: при любом контакте с персонажем обязательно заполняй activeNpc (hasActiveNpc = true), указывая его точную эмоцию, интенсивность (1–5) и краткое наблюдение за мимикой/взглядом/интонацией.
+            8. Предметы и факты: если игрок использует или показывает предмет из инвентаря, обязательно учитывай этот предмет в сцене. Обязательно учитывай блок «ЗАКРЕПЛЁННЫЕ ФАКТЫ ИГРОКА», если он передан.
+            9. Варианты действий и рискованные развилки: всегда предлагай 3–4 принципиально разных варианта. Для 1–2 рискованных вариантов ставь "isRisky": true и заполняй 3–4 исхода в "riskOutcomes". Если в действии игрока есть блок «[Бросок судьбы • ...]» — строй сцену строго по выпавшему исходу!
+            10. Язык: весь ответ исключительно на русском языке (кроме перечислений enum, требуемых схемой).
             """.trimIndent()
         )
     }
 
-    private val flashLiteModel by lazy {
+    private fun getOrCreateModel(
+        choice: AiModelChoice,
+        pace: NarrativePace,
+        isReroll: Boolean
+    ): GenerativeModel {
+        val key = ModelCacheKey(choice, pace, isReroll)
+        return modelCache.getOrPut(key) {
+            val effectiveTemp = if (isReroll) {
+                (pace.temperature + 0.12f).coerceAtMost(1.0f)
+            } else {
+                pace.temperature
+            }
+            Firebase.ai.generativeModel(
+                modelName = choice.modelId,
+                generationConfig = generationConfig {
+                    responseMimeType = "application/json"
+                    responseSchema = turnResponseSchema
+                    temperature = effectiveTemp
+                    maxOutputTokens = pace.maxOutputTokens
+                    if (choice == AiModelChoice.FLASH_38) {
+                        thinkingConfig = thinkingConfig {
+                            thinkingLevel = ThinkingLevel.LOW
+                        }
+                    }
+                },
+                systemInstruction = systemPrompt
+            )
+        }
+    }
+
+    private val lightTextModel by lazy {
+        Firebase.ai.generativeModel(
+            modelName = AiModelChoice.FLASH_LITE.modelId,
+            generationConfig = generationConfig {
+                temperature = 0.8f
+                maxOutputTokens = 512
+            }
+        )
+    }
+
+    private val premiseModel by lazy {
         Firebase.ai.generativeModel(
             modelName = AiModelChoice.FLASH_LITE.modelId,
             generationConfig = generationConfig {
                 responseMimeType = "application/json"
-                responseSchema = turnResponseSchema
-                temperature = 0.85f
-                maxOutputTokens = 8192
-            },
-            systemInstruction = systemPrompt
-        )
-    }
-
-    private val flash38Model by lazy {
-        Firebase.ai.generativeModel(
-            modelName = AiModelChoice.FLASH_38.modelId,
-            generationConfig = generationConfig {
-                responseMimeType = "application/json"
-                responseSchema = turnResponseSchema
-                temperature = 0.85f
-                maxOutputTokens = 8192
-                thinkingConfig = thinkingConfig {
-                    thinkingLevel = ThinkingLevel.LOW
-                }
-            },
-            systemInstruction = systemPrompt
+                responseSchema = premiseSchema
+                temperature = 0.92f
+                maxOutputTokens = 1024
+            }
         )
     }
 
     suspend fun generateOpeningScene(
         setup: SessionSetupInput,
-        preferredModel: AiModelChoice = AiModelChoice.FLASH_LITE
+        preferredModel: AiModelChoice = AiModelChoice.FLASH_LITE,
+        narrativePace: NarrativePace = NarrativePace.BOOKISH
     ): GmTurnOutcome {
+        val heroIdentityLine = buildString {
+            if (setup.playerName.isNotBlank()) {
+                append("Имя героя: ${setup.playerName.trim()}. ")
+            }
+            append("Грамматический род героя: ${setup.playerGender.grammarHintRu}")
+        }
+        val skills = setup.skills.coerced()
         val prompt = """
             НАЧАЛО НОВОЙ ХРОНИКИ.
-            Игрок ответил на 4 стартовых вопроса:
+            ${narrativePace.promptDirectiveRu}
+            $heroIdentityLine
+            Навыки героя (1-10): Натиск ${skills.might}, Скрытность ${skills.stealth}, Проницательность ${skills.insight}, Эрудиция ${skills.lore}.
+
+            Стартовые параметры:
             1. Вселенная: ${setup.universe}
             2. Персонаж: ${setup.characterSummary}
             3. Точка старта: ${setup.startingPoint}
             4. Тон и сложность: ${setup.toneAndDifficulty}
 
-            Сгенерируй захватывающую стартовую сцену, установи стартовый HUD, инвентарь, начальное состояние NPC (если рядом есть персонаж в точке старта — обязательно передай его эмоцию в activeNpc) и дай первые 3–4 принципиально разных варианта действий. Останови сцену в момент, требующий первого решения игрока.
+            Сгенерируй захватывающую стартовую сцену, установи стартовый HUD, числовое здоровье и валюту, структурированный инвентарь (inventoryItems + inventory), стартовые цели (quests + activeQuests), начальное состояние NPC (если рядом есть персонаж — обязательно передай его эмоцию в activeNpc) и дай первые 3–4 принципиально разных варианта действий. Останови сцену в момент, требующий первого решения игрока.
         """.trimIndent()
 
         return invokeModel(
             prompt = prompt,
             defaultTurnNumber = 1L,
             previousNpcs = emptyList(),
+            defaultSkills = skills,
             preferredModel = preferredModel,
+            narrativePace = narrativePace,
+            isReroll = false,
             useStreaming = false,
             onStreamingNarrative = {}
         )
@@ -488,10 +629,46 @@ class GameMasterAiRepository(
         recentTurns: List<CampaignTurn>,
         playerAction: String,
         preferredModel: AiModelChoice = AiModelChoice.FLASH_LITE,
+        narrativePace: NarrativePace = NarrativePace.BOOKISH,
         pinnedFacts: List<String> = emptyList(),
+        isReroll: Boolean = false,
         onStreamingNarrative: (String) -> Unit = {}
     ): GmTurnOutcome {
-        val historyBlock = recentTurns.takeLast(4).joinToString("\n\n") { turn ->
+        val nextTurnNumber = campaign.turnCount + 1L
+        val prompt = buildNextTurnPrompt(
+            campaign = campaign,
+            recentTurns = recentTurns,
+            playerAction = playerAction,
+            narrativePace = narrativePace,
+            pinnedFacts = pinnedFacts,
+            isReroll = isReroll
+        )
+
+        return invokeModel(
+            prompt = prompt,
+            defaultTurnNumber = nextTurnNumber,
+            previousNpcs = campaign.npcs,
+            defaultSkills = campaign.skills,
+            preferredModel = preferredModel,
+            narrativePace = narrativePace,
+            isReroll = isReroll,
+            useStreaming = true,
+            onStreamingNarrative = onStreamingNarrative
+        )
+    }
+
+    internal fun buildNextTurnPrompt(
+        campaign: Campaign,
+        recentTurns: List<CampaignTurn>,
+        playerAction: String,
+        narrativePace: NarrativePace = NarrativePace.BOOKISH,
+        pinnedFacts: List<String> = emptyList(),
+        isReroll: Boolean = false
+    ): String {
+        val nextTurnNumber = campaign.turnCount + 1L
+        val shouldArchiveChapter = nextTurnNumber >= 10L && nextTurnNumber % 10L == 0L
+
+        val historyBlock = recentTurns.takeLast(SLIDING_CONTEXT_TURNS).joinToString("\n\n") { turn ->
             buildString {
                 appendLine("--- Ход ${turn.turnNumber} ---")
                 if (turn.playerAction.isNotBlank()) {
@@ -499,6 +676,25 @@ class GameMasterAiRepository(
                 }
                 appendLine("Повествование: ${turn.narrative}")
                 appendLine("HUD: ${turn.hudLine}")
+                if (turn.activeNpc.hasActiveNpc && turn.activeNpc.name.isNotBlank()) {
+                    appendLine("Активный NPC: ${turn.activeNpc.name} (${turn.activeNpc.emotionLabel}, ${turn.activeNpc.intensity}/5)")
+                }
+                val changeNote = turn.stateSnapshot?.stateChangeSummary?.trim().orEmpty()
+                if (changeNote.isNotBlank()) {
+                    appendLine("Изменения хода: $changeNote")
+                }
+            }.trimEnd()
+        }
+
+        val chapterArchiveBlock = if (campaign.chapterSummaries.isEmpty()) {
+            ""
+        } else {
+            buildString {
+                appendLine()
+                appendLine("ЛЕТОПИСЬ ПРОШЛЫХ ГЛАВ (ДОЛГОСРОЧНАЯ ПАМЯТЬ):")
+                campaign.chapterSummaries.takeLast(12).forEach { summary ->
+                    appendLine("- $summary")
+                }
             }
         }
 
@@ -514,6 +710,9 @@ class GameMasterAiRepository(
                     if (npc.boundaries.isNotBlank()) {
                         append(" | Границы: ${npc.boundaries}")
                     }
+                    if (npc.recentActions.isNotEmpty()) {
+                        append(" | Помнит: ${npc.recentActions.joinToString("; ")}")
+                    }
                 }
             }
         }
@@ -523,6 +722,28 @@ class GameMasterAiRepository(
         } else {
             campaign.butterflyEvents.takeLast(10).joinToString("\n") { ev ->
                 "- Ход ${ev.turnNumber} [${ev.impactLevel}]: ${ev.title} — ${ev.consequence}"
+            }
+        }
+
+        val inventoryBlock = campaign.resolvedInventoryItems().let { items ->
+            if (items.isEmpty()) {
+                "Пусто"
+            } else {
+                items.joinToString(", ") { item ->
+                    val equipMark = if (item.isEquipped) " [экипировано]" else ""
+                    val qtyMark = if (item.quantity > 1L) " ×${item.quantity}" else ""
+                    "${item.name}$qtyMark (${item.resolvedCategory().labelRu})$equipMark"
+                }
+            }
+        }
+
+        val questsBlock = campaign.resolvedQuests().let { quests ->
+            if (quests.isEmpty()) {
+                "Нет зафиксированных квестов."
+            } else {
+                quests.joinToString("\n") { q ->
+                    "- [${q.resolvedStatus().labelRu}] ${q.title}"
+                }
             }
         }
 
@@ -538,41 +759,152 @@ class GameMasterAiRepository(
             }
         }
 
-        val prompt = """
+        val gender = campaign.resolvedGender()
+        val heroIdentityLine = buildString {
+            if (campaign.playerName.isNotBlank()) {
+                append("Имя героя: ${campaign.playerName}. ")
+            }
+            append("Грамматический род героя: ${gender.grammarHintRu}")
+        }
+
+        val archiveDirective = if (shouldArchiveChapter) {
+            "\nАРХИВАЦИЯ ГЛАВЫ (ХОД $nextTurnNumber): ОБЯЗАТЕЛЬНО заполни поле \"chapterArchiveSummary\" (2–3 ёмких предложения, сжимающих ключевые события ходов ${nextTurnNumber - 9L}–$nextTurnNumber), а в \"storySummary\" оставь только актуальную текущую сюжетную арку!"
+        } else {
+            ""
+        }
+
+        val rerollDirective = if (isReroll) {
+            "\nРЕЖИМ ПЕРЕИГРОВКИ СЦЕНЫ: предложи свежую, заметно иную по подаче, деталям и репликам альтернативную версию развития этой сцены на то же действие игрока."
+        } else {
+            ""
+        }
+
+        val skills = campaign.skills.coerced()
+        val healthText = if (campaign.healthPercent in 0L..100L) "${campaign.healthPercent}%" else campaign.hudStatusAndInventory
+        val currencyText = campaign.currencyLabel.ifBlank { "${campaign.currencyAmount}" }
+
+        return """
+            ${narrativePace.promptDirectiveRu}
+            $heroIdentityLine$archiveDirective$rerollDirective
+
             КОНТЕКСТ КАМПАНИИ:
             - Вселенная: ${campaign.universe}
             - Персонаж игрока: ${campaign.characterSummary}
+            - Навыки (1-10): Натиск ${skills.might}, Скрытность ${skills.stealth}, Проницательность ${skills.insight}, Эрудиция ${skills.lore}
+            - Здоровье сейчас: $healthText | Валюта: $currencyText
             - Точка старта: ${campaign.startingPoint}
             - Тон и сложность: ${campaign.toneAndDifficulty}
-            - Текущий ход: ${campaign.turnCount + 1}
+            - Текущий ход: $nextTurnNumber
             - Отклонение от канона сейчас: ${campaign.canonDeviationPercent}%
-            - Текущий инвентарь: ${campaign.inventory.joinToString(", ").ifBlank { "Пусто" }}
-            - Резюме сюжета: ${campaign.storySummary.ifBlank { "Начало истории." }}
+            - Текущий инвентарь: $inventoryBlock
+            - Текущая сюжетная арка: ${campaign.storySummary.ifBlank { "Начало истории." }}
+            $chapterArchiveBlock
             $factsSection
 
-            ИЗВЕСТНЫЕ NPC, ИХ ХАРАКТЕРЫ И ЛИЧНЫЕ ГРАНИЦЫ:
+            ЖУРНАЛ КВЕСТОВ:
+            $questsBlock
+
+            ИЗВЕСТНЫЕ NPC, ИХ ХАРАКТЕРЫ, ГРАНИЦЫ И ПАМЯТЬ:
             $npcsBlock
 
             ЭФФЕКТ БАБОЧКИ (КЛЮЧЕВЫЕ ПОВОРОТЫ):
             $butterflyBlock
 
-            ПОСЛЕДНИЕ ХОДЫ:
+            ПОСЛЕДНИЕ ХОДЫ (ДО $SLIDING_CONTEXT_TURNS):
             $historyBlock
 
             НОВОЕ ДЕЙСТВИЕ ИГРОКА:
             "$playerAction"
 
             ПРОВЕРКА ГРАНИЦ: не позволяй NPC мгновенно соглашаться или влюбляться без веских оснований. Если игрок торопит события, давит или нарушает границы персонажа, NPC должен отказать, поставить условие или отстраниться.
-            Оцени логичность, подготовку и контекст действия игрока. Опиши реакцию мира и NPC (строго без контроля над игроком!). Обнови HUD, эмоции активного NPC, инвентарь, отношения (trustLevel меняй плавно), процент отклонения от канона и предложи 3–4 новых разных выбора.
+            Оцени логичность, навыки, экипировку и контекст действия игрока. Опиши реакцию мира и NPC (строго без контроля над игроком!). Обнови HUD, healthPercent, currencyAmount/currencyLabel, структурированный инвентарь (inventoryItems + inventory), квесты (quests + activeQuests), эмоции активного NPC, отношения (trustLevel меняй плавно), stateChangeSummary и предложи 3–4 новых разных выбора.
+        """.trimIndent()
+    }
+
+    /**
+     * Quick non-turn AI lore inspection of an inventory item in the context of the current chronicle.
+     */
+    suspend fun inspectItem(
+        campaign: Campaign,
+        item: InventoryItem
+    ): String {
+        val prompt = """
+            Ты — гейм-мастер текстовой RPG в мире «${campaign.universe}».
+            Игрок осматривает предмет из своего инвентаря без траты хода.
+            Локация сейчас: ${campaign.hudLocation}.
+            Предмет: ${item.name} (категория: ${item.resolvedCategory().labelRu}, количество: ${item.quantity}, ${if (item.isEquipped) "экипирован" else "в сумке"}).
+            ${if (item.description.isNotBlank()) "Известное описание: ${item.description}" else ""}
+            Краткий сюжет: ${campaign.storySummary.take(400)}
+
+            Дай атмосферное, полезное описание этого предмета в 2–4 предложениях на русском языке: внешний вид, мелкие скрытые детали, состояние и чем он может пригодиться в этой истории. Без контроля над действиями игрока.
         """.trimIndent()
 
-        return invokeModel(
-            prompt = prompt,
-            defaultTurnNumber = campaign.turnCount + 1L,
-            previousNpcs = campaign.npcs,
-            preferredModel = preferredModel,
-            useStreaming = true,
-            onStreamingNarrative = onStreamingNarrative
+        return try {
+            withTimeout(20_000L) {
+                lightTextModel.generateContent(prompt).text.orEmpty().trim()
+                    .ifBlank { "Вы внимательно осматриваете «${item.name}», но не находите ничего сверх обычного." }
+            }
+        } catch (e: CancellationException) {
+            throw e
+        } catch (e: Exception) {
+            throw IllegalStateException(extractDetailedErrorMessage(e), e)
+        }
+    }
+
+    /**
+     * Generates an original RPG premise for the SetupWizard based on the chosen genre.
+     */
+    suspend fun generateScenarioPremise(
+        genre: ScenarioGenre
+    ): SessionSetupInput {
+        val genreFocus = if (genre == ScenarioGenre.ALL) {
+            "любой яркий небанальный жанр (фэнтези, романтический нуар, уютная повседневность, киберпанк или мистика)"
+        } else {
+            "жанр «${genre.labelRu}»"
+        }
+
+        val prompt = """
+            Придумай оригинальную, цепляющую завязку для интерактивной текстовой RPG на русском языке.
+            Направление: $genreFocus.
+            Сделай героя живым и приземлённым (со слабостью и личным мотивом), стартовую точку — конкретной сценой с интригой, а тон — реалистичным без сюжетной брони.
+            Распредели 4 навыка героя (might, stealth, insight, lore) в диапазоне от 2 до 9 так, чтобы сумма была около 22–25.
+        """.trimIndent()
+
+        return try {
+            val rawJson = withTimeout(25_000L) {
+                premiseModel.generateContent(prompt).text.orEmpty().trim()
+            }
+            parseScenarioPremiseJson(rawJson)
+        } catch (e: CancellationException) {
+            throw e
+        } catch (e: Exception) {
+            throw IllegalStateException(extractDetailedErrorMessage(e), e)
+        }
+    }
+
+    internal fun parseScenarioPremiseJson(rawJson: String): SessionSetupInput {
+        val root = JSONObject(rawJson)
+        val universe = root.optString("universe").trim()
+        val characterSummary = root.optString("characterSummary").trim()
+        val startingPoint = root.optString("startingPoint").trim()
+        val toneAndDifficulty = root.optString("toneAndDifficulty").trim()
+        require(universe.isNotBlank() && startingPoint.isNotBlank()) {
+            "ИИ вернул неполную завязку мира."
+        }
+        return SessionSetupInput(
+            title = root.optString("title").trim().ifBlank { universe.take(48) },
+            universe = universe,
+            characterSummary = characterSummary.ifBlank { "Свой персонаж (OC) с непростым прошлым." },
+            startingPoint = startingPoint,
+            toneAndDifficulty = toneAndDifficulty.ifBlank { "Реалистичные последствия и живые характеры NPC." },
+            playerName = root.optString("playerName").trim(),
+            playerGender = PlayerGender.fromKey(root.optString("playerGender")),
+            skills = HeroSkills(
+                might = root.optLong("might", 5L),
+                stealth = root.optLong("stealth", 5L),
+                insight = root.optLong("insight", 5L),
+                lore = root.optLong("lore", 5L)
+            ).coerced()
         )
     }
 
@@ -580,7 +912,10 @@ class GameMasterAiRepository(
         prompt: String,
         defaultTurnNumber: Long,
         previousNpcs: List<NpcRelation>,
+        defaultSkills: HeroSkills,
         preferredModel: AiModelChoice,
+        narrativePace: NarrativePace,
+        isReroll: Boolean,
         useStreaming: Boolean = true,
         onStreamingNarrative: (String) -> Unit
     ): GmTurnOutcome {
@@ -588,25 +923,29 @@ class GameMasterAiRepository(
             val now = System.currentTimeMillis()
             val shouldUseFlash38 = preferredModel == AiModelChoice.FLASH_38 && now >= flash38CooldownUntilMs
 
+            val flashLite = getOrCreateModel(AiModelChoice.FLASH_LITE, narrativePace, isReroll)
             val jsonString = if (!shouldUseFlash38) {
                 fetchModelJson(
-                    targetModel = flashLiteModel,
+                    targetModel = flashLite,
                     prompt = prompt,
                     timeoutMs = FLASH_LITE_TIMEOUT_MS,
                     useStreaming = useStreaming,
                     defaultTurnNumber = defaultTurnNumber,
                     previousNpcs = previousNpcs,
+                    defaultSkills = defaultSkills,
                     onStreamingNarrative = onStreamingNarrative
                 )
             } else {
+                val flash38 = getOrCreateModel(AiModelChoice.FLASH_38, narrativePace, isReroll)
                 try {
                     fetchModelJson(
-                        targetModel = flash38Model,
+                        targetModel = flash38,
                         prompt = prompt,
                         timeoutMs = FLASH_38_TIMEOUT_MS,
                         useStreaming = useStreaming,
                         defaultTurnNumber = defaultTurnNumber,
                         previousNpcs = previousNpcs,
+                        defaultSkills = defaultSkills,
                         onStreamingNarrative = onStreamingNarrative
                     )
                 } catch (timeout: TimeoutCancellationException) {
@@ -614,12 +953,13 @@ class GameMasterAiRepository(
                     flash38CooldownUntilMs = System.currentTimeMillis() + COOLDOWN_MS
                     onStreamingNarrative("")
                     fetchModelJson(
-                        targetModel = flashLiteModel,
+                        targetModel = flashLite,
                         prompt = prompt,
                         timeoutMs = FLASH_LITE_TIMEOUT_MS,
                         useStreaming = useStreaming,
                         defaultTurnNumber = defaultTurnNumber,
                         previousNpcs = previousNpcs,
+                        defaultSkills = defaultSkills,
                         onStreamingNarrative = onStreamingNarrative
                     )
                 } catch (e: CancellationException) {
@@ -630,12 +970,13 @@ class GameMasterAiRepository(
                         flash38CooldownUntilMs = System.currentTimeMillis() + COOLDOWN_MS
                         onStreamingNarrative("")
                         fetchModelJson(
-                            targetModel = flashLiteModel,
+                            targetModel = flashLite,
                             prompt = prompt,
                             timeoutMs = FLASH_LITE_TIMEOUT_MS,
                             useStreaming = useStreaming,
                             defaultTurnNumber = defaultTurnNumber,
                             previousNpcs = previousNpcs,
+                            defaultSkills = defaultSkills,
                             onStreamingNarrative = onStreamingNarrative
                         )
                     } else {
@@ -647,7 +988,7 @@ class GameMasterAiRepository(
             if (jsonString.isBlank()) {
                 throw IllegalStateException("ИИ-мастер вернул пустой ответ. Попробуйте повторить ход.")
             }
-            return parseTurnOutcome(jsonString, defaultTurnNumber, previousNpcs)
+            return parseTurnOutcome(jsonString, defaultTurnNumber, previousNpcs, defaultSkills)
         } catch (e: TimeoutCancellationException) {
             Log.e(TAG, "Firebase AI generation timed out", e)
             throw IllegalStateException("ИИ-мастер слишком долго обдумывал сцену. Проверьте интернет и попробуйте ещё раз.", e)
@@ -724,6 +1065,7 @@ class GameMasterAiRepository(
         useStreaming: Boolean,
         defaultTurnNumber: Long,
         previousNpcs: List<NpcRelation>,
+        defaultSkills: HeroSkills,
         onStreamingNarrative: (String) -> Unit
     ): String {
         if (!useStreaming) {
@@ -748,19 +1090,16 @@ class GameMasterAiRepository(
         } catch (e: CancellationException) {
             throw e
         } catch (streamError: Exception) {
-            // Preserve quota and App Check errors directly without duplicate retries
             if (isQuotaOrRateLimitError(streamError) || isAppCheckError(streamError)) {
                 throw streamError
             }
-            // If SSE failed right at the end after full JSON already arrived, salvage it immediately
             val accumulated = builder.toString().trim()
             if (accumulated.isNotBlank() &&
-                runCatching { parseTurnOutcome(accumulated, defaultTurnNumber, previousNpcs) }.isSuccess
+                runCatching { parseTurnOutcome(accumulated, defaultTurnNumber, previousNpcs, defaultSkills) }.isSuccess
             ) {
                 Log.w(TAG, "Stream threw at EOF after valid JSON arrived; using accumulated response", streamError)
                 return accumulated
             }
-            // Otherwise seamlessly fall back to unary generateContent to bypass SSE chunk decoding issues
             Log.w(TAG, "Streaming failed (${extractDetailedErrorMessage(streamError)}); falling back to unary generateContent", streamError)
             generateUnaryJson(targetModel, prompt, timeoutMs)
         }
@@ -777,7 +1116,8 @@ class GameMasterAiRepository(
     internal fun parseTurnOutcome(
         jsonString: String,
         turnNumber: Long,
-        previousNpcs: List<NpcRelation> = emptyList()
+        previousNpcs: List<NpcRelation> = emptyList(),
+        defaultSkills: HeroSkills = HeroSkills()
     ): GmTurnOutcome {
         val root = JSONObject(jsonString)
 
@@ -802,7 +1142,7 @@ class GameMasterAiRepository(
         }
 
         val inventoryArray = root.optJSONArray("inventory")
-        val inventory = buildList {
+        val flatInventory = buildList {
             if (inventoryArray != null) {
                 for (i in 0 until inventoryArray.length()) {
                     val item = inventoryArray.optString(i).trim()
@@ -810,6 +1150,31 @@ class GameMasterAiRepository(
                 }
             }
         }
+
+        val structuredArray = root.optJSONArray("inventoryItems")
+        val structuredInventory = buildList {
+            if (structuredArray != null) {
+                for (i in 0 until structuredArray.length()) {
+                    val obj = structuredArray.optJSONObject(i) ?: continue
+                    val name = obj.optString("name").trim()
+                    if (name.isBlank()) continue
+                    val cat = ItemCategory.fromKey(obj.optString("category"))
+                    add(
+                        InventoryItem(
+                            id = obj.optString("id").trim(),
+                            name = name,
+                            category = cat.key,
+                            quantity = obj.optLong("quantity", 1L).coerceIn(1L, 999L),
+                            isEquipped = obj.optBoolean("isEquipped", false),
+                            description = obj.optString("description").trim()
+                        )
+                    )
+                }
+            }
+        }.ifEmpty {
+            flatInventory.mapIndexed { idx, name -> InventoryItem.fromLegacyName(name, idx) }
+        }
+        val effectiveFlatInventory = flatInventory.ifEmpty { structuredInventory.map { it.name } }
 
         val activeNpcArchetype = root.optString("activeNpcArchetype").trim().lowercase()
         val npcsArray = root.optJSONArray("npcs")
@@ -825,6 +1190,19 @@ class GameMasterAiRepository(
                         .ifBlank {
                             if (name.equals(activeNpc.name, ignoreCase = true)) activeNpcArchetype else ""
                         }
+                    val recentAction = obj.optString("recentAction").trim()
+                    val recentActionsArray = obj.optJSONArray("recentActions")
+                    val parsedRecentActions = buildList {
+                        if (recentActionsArray != null) {
+                            for (j in 0 until recentActionsArray.length()) {
+                                val entry = recentActionsArray.optString(j).trim()
+                                if (entry.isNotBlank()) add(entry)
+                            }
+                        }
+                        if (recentAction.isNotBlank() && none { it.equals(recentAction, ignoreCase = true) }) {
+                            add(recentAction)
+                        }
+                    }.takeLast(3)
                     val rawRelation = NpcRelation(
                         name = name,
                         role = obj.optString("role").trim(),
@@ -834,7 +1212,8 @@ class GameMasterAiRepository(
                         lastEmotionCategory = cat.key,
                         archetype = parsedArchetype,
                         personality = obj.optString("personality").trim(),
-                        boundaries = obj.optString("boundaries").trim()
+                        boundaries = obj.optString("boundaries").trim(),
+                        recentActions = parsedRecentActions
                     )
                     add(NpcTrustGuardrail.apply(rawRelation, prev))
                 }
@@ -853,11 +1232,11 @@ class GameMasterAiRepository(
                     lastEmotionCategory = activeNpc.emotionCategory,
                     archetype = activeNpcArchetype,
                     personality = prev?.personality.orEmpty(),
-                    boundaries = prev?.boundaries.orEmpty()
+                    boundaries = prev?.boundaries.orEmpty(),
+                    recentActions = prev?.recentActions.orEmpty()
                 )
                 add(NpcTrustGuardrail.apply(fallbackRelation, prev))
             }
-            // Keep previously tracked NPCs so long-term boundaries & trust persist across scenes
             previousNpcs.forEach { prev ->
                 if (none { it.name.equals(prev.name, ignoreCase = true) } && size < 40) {
                     add(prev)
@@ -921,7 +1300,7 @@ class GameMasterAiRepository(
         }
 
         val questsArray = root.optJSONArray("activeQuests")
-        val activeQuests = buildList {
+        val legacyActiveQuests = buildList {
             if (questsArray != null) {
                 for (i in 0 until questsArray.length()) {
                     val q = questsArray.optString(i).trim()
@@ -930,9 +1309,49 @@ class GameMasterAiRepository(
             }
         }.take(6)
 
+        val structuredQuestsArray = root.optJSONArray("quests")
+        val structuredQuests = buildList {
+            if (structuredQuestsArray != null) {
+                for (i in 0 until structuredQuestsArray.length()) {
+                    val obj = structuredQuestsArray.optJSONObject(i) ?: continue
+                    val title = obj.optString("title").trim()
+                    if (title.isBlank()) continue
+                    add(
+                        QuestEntry(
+                            id = obj.optString("id").trim(),
+                            title = title.take(180),
+                            status = QuestStatus.fromKey(obj.optString("status")).key,
+                            updatedAtTurn = turnNumber
+                        )
+                    )
+                }
+            }
+        }.ifEmpty {
+            legacyActiveQuests.mapIndexed { idx, title ->
+                QuestEntry(
+                    id = "quest_${turnNumber}_$idx",
+                    title = title,
+                    status = QuestStatus.ACTIVE.key,
+                    updatedAtTurn = turnNumber
+                )
+            }
+        }
+
+        val activeQuests = structuredQuests
+            .filter { it.resolvedStatus() == QuestStatus.ACTIVE }
+            .map { it.title }
+            .ifEmpty { legacyActiveQuests }
+            .take(6)
+
         val healthPercent = root.optLong("healthPercent", 100L).coerceIn(0L, 100L)
         val healthStatus = root.optString("healthStatus").trim()
         val currencyLabel = root.optString("currencyLabel").trim()
+        val parsedCurrencyAmount = if (root.has("currencyAmount")) {
+            root.optLong("currencyAmount", 0L).coerceAtLeast(0L)
+        } else {
+            Regex("""(\d+)""").find(currencyLabel)?.groupValues?.getOrNull(1)?.toLongOrNull() ?: 0L
+        }
+
         val rawStatus = root.optString("hudStatusAndInventory").trim()
         val formattedStatus = buildString {
             if (healthStatus.isNotBlank()) {
@@ -971,6 +1390,9 @@ class GameMasterAiRepository(
             rawTime
         }
 
+        val chapterArchiveSummary = root.optString("chapterArchiveSummary").trim().takeIf { it.isNotBlank() }
+        val stateChangeSummary = root.optString("stateChangeSummary").trim().take(400)
+
         return GmTurnOutcome(
             narrative = narrative,
             hudLocation = root.optString("hudLocation").trim().ifBlank { "Неизвестно" },
@@ -979,12 +1401,20 @@ class GameMasterAiRepository(
             hudRelationsAndCanon = root.optString("hudRelationsAndCanon").trim().ifBlank { "Канон стабилен" },
             canonDeviationPercent = root.optLong("canonDeviationPercent", 0L).coerceIn(0L, 100L),
             activeNpc = activeNpc,
-            inventory = inventory,
+            inventory = effectiveFlatInventory,
             npcs = npcs,
             newButterflyEvent = butterflyEvent,
             storySummary = root.optString("storySummary").trim(),
             choices = choices,
-            activeQuests = activeQuests
+            activeQuests = activeQuests,
+            healthPercent = healthPercent,
+            currencyAmount = parsedCurrencyAmount,
+            currencyLabel = currencyLabel,
+            skills = defaultSkills.coerced(),
+            inventoryItems = structuredInventory,
+            quests = structuredQuests,
+            chapterArchiveSummary = chapterArchiveSummary,
+            stateChangeSummary = stateChangeSummary
         )
     }
 
@@ -994,8 +1424,9 @@ class GameMasterAiRepository(
             .any { lower.contains(it) }
     }
 
-    private companion object {
+    internal companion object {
         const val TAG = "GameMasterAiRepo"
+        const val SLIDING_CONTEXT_TURNS = 7
         const val FLASH_38_TIMEOUT_MS = 35_000L
         const val FLASH_LITE_TIMEOUT_MS = 55_000L
         const val COOLDOWN_MS = 120_000L

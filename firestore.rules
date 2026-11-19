@@ -35,11 +35,23 @@ service cloud.firestore {
              npc.note is string && npc.note.size() <= 300;
     }
 
+    function isValidHeroSkills(skills) {
+      return skills is map &&
+             skills.keys().hasAll(['might', 'stealth', 'insight', 'lore']) &&
+             skills.keys().hasOnly(['might', 'stealth', 'insight', 'lore']) &&
+             skills.might is int && skills.might >= 1 && skills.might <= 10 &&
+             skills.stealth is int && skills.stealth >= 1 && skills.stealth <= 10 &&
+             skills.insight is int && skills.insight >= 1 && skills.insight <= 10 &&
+             skills.lore is int && skills.lore >= 1 && skills.lore <= 10;
+    }
+
     function isValidCampaign(data) {
       return data.userId is string && data.userId == request.auth.uid &&
              data.title is string && data.title.size() >= 1 && data.title.size() <= 120 &&
              data.universe is string && data.universe.size() >= 1 && data.universe.size() <= 300 &&
              data.characterSummary is string && data.characterSummary.size() >= 1 && data.characterSummary.size() <= 600 &&
+             (!data.keys().hasAny(['playerName']) || (data.playerName is string && data.playerName.size() <= 80)) &&
+             (!data.keys().hasAny(['playerGender']) || (data.playerGender is string && data.playerGender in ['male', 'female', 'neutral'])) &&
              data.startingPoint is string && data.startingPoint.size() >= 1 && data.startingPoint.size() <= 400 &&
              data.toneAndDifficulty is string && data.toneAndDifficulty.size() >= 1 && data.toneAndDifficulty.size() <= 300 &&
              data.turnCount is int && data.turnCount >= 0 && data.turnCount <= 100000 &&
@@ -48,12 +60,19 @@ service cloud.firestore {
              data.hudStatusAndInventory is string && data.hudStatusAndInventory.size() <= 300 &&
              data.hudRelationsAndCanon is string && data.hudRelationsAndCanon.size() <= 300 &&
              data.canonDeviationPercent is int && data.canonDeviationPercent >= 0 && data.canonDeviationPercent <= 100 &&
+             (!data.keys().hasAny(['healthPercent']) || (data.healthPercent is int && data.healthPercent >= -1 && data.healthPercent <= 100)) &&
+             (!data.keys().hasAny(['currencyAmount']) || (data.currencyAmount is int && data.currencyAmount >= 0 && data.currencyAmount <= 100000000)) &&
+             (!data.keys().hasAny(['currencyLabel']) || (data.currencyLabel is string && data.currencyLabel.size() <= 80)) &&
+             (!data.keys().hasAny(['skills']) || isValidHeroSkills(data.skills)) &&
              isValidNpcEmotionSnapshot(data.activeNpc) &&
              data.inventory is list && data.inventory.size() <= 60 && (data.inventory.size() == 0 || data.inventory[0] is string) &&
+             (!data.keys().hasAny(['inventoryItems']) || (data.inventoryItems is list && data.inventoryItems.size() <= 60 && (data.inventoryItems.size() == 0 || data.inventoryItems[0] is map))) &&
              data.npcs is list && data.npcs.size() <= 60 && (data.npcs.size() == 0 || data.npcs[0] is map) &&
              data.butterflyEvents is list && data.butterflyEvents.size() <= 60 && (data.butterflyEvents.size() == 0 || data.butterflyEvents[0] is map) &&
              (!data.keys().hasAny(['activeQuests']) || (data.activeQuests is list && data.activeQuests.size() <= 12 && (data.activeQuests.size() == 0 || data.activeQuests[0] is string))) &&
-             data.storySummary is string && data.storySummary.size() <= 4000;
+             (!data.keys().hasAny(['quests']) || (data.quests is list && data.quests.size() <= 30 && (data.quests.size() == 0 || data.quests[0] is map))) &&
+             data.storySummary is string && data.storySummary.size() <= 4000 &&
+             (!data.keys().hasAny(['chapterSummaries']) || (data.chapterSummaries is list && data.chapterSummaries.size() <= 40 && (data.chapterSummaries.size() == 0 || data.chapterSummaries[0] is string)));
     }
 
     function isValidTurn(data, campaignId) {
@@ -64,7 +83,8 @@ service cloud.firestore {
              data.narrative is string && data.narrative.size() >= 1 && data.narrative.size() <= 12000 &&
              data.hudLine is string && data.hudLine.size() <= 600 &&
              isValidNpcEmotionSnapshot(data.activeNpc) &&
-             data.choices is list && data.choices.size() <= 6 && (data.choices.size() == 0 || data.choices[0] is map);
+             data.choices is list && data.choices.size() <= 6 && (data.choices.size() == 0 || data.choices[0] is map) &&
+             (!data.keys().hasAny(['stateSnapshot']) || data.stateSnapshot is map);
     }
 
     match /users/{userId}/campaigns/{campaignId} {
@@ -82,11 +102,13 @@ service cloud.firestore {
                          'createdAt', 'updatedAt'
                        ]) &&
                        incoming().keys().hasOnly([
-                         'userId', 'title', 'universe', 'characterSummary', 'startingPoint',
-                         'toneAndDifficulty', 'turnCount', 'hudLocation', 'hudTime',
+                         'userId', 'title', 'universe', 'characterSummary', 'playerName', 'playerGender',
+                         'startingPoint', 'toneAndDifficulty', 'turnCount', 'hudLocation', 'hudTime',
                          'hudStatusAndInventory', 'hudRelationsAndCanon', 'canonDeviationPercent',
-                         'activeNpc', 'inventory', 'npcs', 'butterflyEvents', 'activeQuests',
-                         'storySummary', 'createdAt', 'updatedAt'
+                         'healthPercent', 'currencyAmount', 'currencyLabel', 'skills',
+                         'activeNpc', 'inventory', 'inventoryItems', 'npcs', 'butterflyEvents',
+                         'activeQuests', 'quests', 'storySummary', 'chapterSummaries',
+                         'createdAt', 'updatedAt'
                        ]) &&
                        incoming().createdAt is timestamp && incoming().createdAt <= request.time &&
                        incoming().updatedAt is timestamp && incoming().updatedAt <= request.time &&
@@ -100,10 +122,11 @@ service cloud.firestore {
                        incoming().createdAt == existing().createdAt &&
                        incoming().updatedAt is timestamp && incoming().updatedAt <= request.time &&
                        incoming().diff(existing()).affectedKeys().hasOnly([
-                         'title', 'turnCount', 'hudLocation', 'hudTime',
+                         'title', 'playerName', 'playerGender', 'turnCount', 'hudLocation', 'hudTime',
                          'hudStatusAndInventory', 'hudRelationsAndCanon', 'canonDeviationPercent',
-                         'activeNpc', 'inventory', 'npcs', 'butterflyEvents', 'activeQuests',
-                         'storySummary', 'updatedAt'
+                         'healthPercent', 'currencyAmount', 'currencyLabel', 'skills',
+                         'activeNpc', 'inventory', 'inventoryItems', 'npcs', 'butterflyEvents',
+                         'activeQuests', 'quests', 'storySummary', 'chapterSummaries', 'updatedAt'
                        ]);
 
       allow delete: if isSignedIn() && request.auth.uid == userId && isValidId(campaignId);
@@ -123,7 +146,7 @@ service cloud.firestore {
                          ]) &&
                          incoming().keys().hasOnly([
                            'userId', 'campaignId', 'turnNumber', 'playerAction',
-                           'narrative', 'hudLine', 'activeNpc', 'choices', 'createdAt'
+                           'narrative', 'hudLine', 'activeNpc', 'choices', 'stateSnapshot', 'createdAt'
                          ]) &&
                          incoming().createdAt is timestamp && incoming().createdAt <= request.time &&
                          isValidTurn(incoming(), campaignId);

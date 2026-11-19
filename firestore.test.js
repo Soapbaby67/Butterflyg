@@ -39,6 +39,25 @@ function validCampaignPayload(userId) {
       note: "Внимательно вглядывается в незнакомца.",
     },
     inventory: ["Кунай", "Свиток"],
+    inventoryItems: [
+      {
+        id: "kunai_1",
+        name: "Кунай",
+        category: "weapon",
+        quantity: 2,
+        isEquipped: true,
+        description: "Стандартный клинок шиноби",
+      },
+    ],
+    playerName: "Кайто",
+    playerGender: "male",
+    healthPercent: 100,
+    currencyAmount: 50,
+    currencyLabel: "рё",
+    skills: { might: 5, stealth: 7, insight: 6, lore: 5 },
+    chapterSummaries: [],
+    quests: [{ id: "q1", title: "Пройти экзамен", status: "active", updatedAtTurn: 1 }],
+    activeQuests: ["Пройти экзамен"],
     npcs: [
       {
         name: "Ирука Умино",
@@ -47,6 +66,7 @@ function validCampaignPayload(userId) {
         statusLabel: "Доброжелателен",
         lastEmotion: "Сдержанная теплота",
         lastEmotionCategory: "calm",
+        recentActions: ["Показал пропуск"],
       },
     ],
     butterflyEvents: [],
@@ -76,6 +96,16 @@ function validTurnPayload(userId, campaignId) {
       { id: "1", approach: "Дипломатический", text: "Представиться и показать пропуск" },
       { id: "2", approach: "Скрытный", text: "Обойти пост по крышам" },
     ],
+    stateSnapshot: {
+      hudLocation: "Ворота Конохи",
+      hudTime: "Рассвет",
+      hudStatusAndInventory: "Здоров | Кунай, свиток",
+      hudRelationsAndCanon: "Ирука: доверие | Канон: 5%",
+      canonDeviationPercent: 5,
+      healthPercent: 100,
+      currencyAmount: 50,
+      currencyLabel: "рё",
+    },
     createdAt: new Date(),
   };
 }

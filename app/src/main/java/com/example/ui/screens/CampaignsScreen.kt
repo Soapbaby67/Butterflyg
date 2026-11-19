@@ -25,6 +25,7 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.outlined.Logout
 import androidx.compose.material.icons.filled.Add
 import androidx.compose.material.icons.outlined.AutoStories
+import androidx.compose.material.icons.outlined.CallSplit
 import androidx.compose.material.icons.outlined.DeleteOutline
 import androidx.compose.material.icons.outlined.Explore
 import androidx.compose.material.icons.outlined.FavoriteBorder
@@ -104,6 +105,7 @@ fun CampaignsScreen(
 ) {
     val campaignsState by viewModel.campaignsState.collectAsStateWithLifecycle()
     val deleteError by viewModel.deleteError.collectAsStateWithLifecycle()
+    val forkingCampaignId by viewModel.forkingCampaignId.collectAsStateWithLifecycle()
     var campaignToDelete by remember { mutableStateOf<Campaign?>(null) }
     var selectedGenre by remember { mutableStateOf(ScenarioGenre.ALL) }
     val haptics = rememberRpgHaptics(hapticsEnabled)
@@ -376,9 +378,17 @@ fun CampaignsScreen(
                             items(state.data, key = { it.id }) { campaign ->
                                 CampaignSlotCard(
                                     campaign = campaign,
+                                    isForking = forkingCampaignId == campaign.id,
                                     onOpen = {
                                         haptics.tap()
                                         onOpenCampaign(campaign.id)
+                                    },
+                                    onFork = {
+                                        haptics.tap()
+                                        audio?.playSfx(SfxEvent.UI_TAP)
+                                        viewModel.forkCampaign(campaign) { forkedId ->
+                                            onOpenCampaign(forkedId)
+                                        }
                                     },
                                     onRequestDelete = { campaignToDelete = campaign },
                                     modifier = Modifier.padding(horizontal = 16.dp)
@@ -520,7 +530,9 @@ private fun UniverseTemplateCard(
 @Composable
 private fun CampaignSlotCard(
     campaign: Campaign,
+    isForking: Boolean = false,
     onOpen: () -> Unit,
+    onFork: () -> Unit = {},
     onRequestDelete: () -> Unit,
     modifier: Modifier = Modifier
 ) {
@@ -601,17 +613,40 @@ private fun CampaignSlotCard(
                         )
                     }
 
-                    IconButton(
-                        onClick = onRequestDelete,
-                        modifier = Modifier
-                            .minimumInteractiveComponentSize()
-                            .testTag("delete_campaign_${campaign.id}")
-                    ) {
-                        Icon(
-                            imageVector = Icons.Outlined.DeleteOutline,
-                            contentDescription = "Удалить хронику",
-                            tint = Color(0xFFF6EFE4)
-                        )
+                    Row(verticalAlignment = Alignment.CenterVertically) {
+                        IconButton(
+                            onClick = onFork,
+                            enabled = !isForking,
+                            modifier = Modifier
+                                .minimumInteractiveComponentSize()
+                                .testTag("fork_campaign_${campaign.id}")
+                        ) {
+                            if (isForking) {
+                                CircularProgressIndicator(
+                                    modifier = Modifier.size(18.dp),
+                                    color = Color(0xFFF6EFE4),
+                                    strokeWidth = 2.dp
+                                )
+                            } else {
+                                Icon(
+                                    imageVector = Icons.Outlined.CallSplit,
+                                    contentDescription = "Создать ветку хроники (Форк)",
+                                    tint = Color(0xFFF6EFE4)
+                                )
+                            }
+                        }
+                        IconButton(
+                            onClick = onRequestDelete,
+                            modifier = Modifier
+                                .minimumInteractiveComponentSize()
+                                .testTag("delete_campaign_${campaign.id}")
+                        ) {
+                            Icon(
+                                imageVector = Icons.Outlined.DeleteOutline,
+                                contentDescription = "Удалить хронику",
+                                tint = Color(0xFFF6EFE4)
+                            )
+                        }
                     }
                 }
 

@@ -25,6 +25,7 @@ import androidx.compose.material.icons.outlined.AutoAwesome
 import androidx.compose.material.icons.outlined.Bolt
 import androidx.compose.material.icons.outlined.Casino
 import androidx.compose.material.icons.outlined.CheckCircle
+import androidx.compose.material.icons.outlined.Shield
 import androidx.compose.material.icons.outlined.WarningAmber
 import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
@@ -56,6 +57,9 @@ import androidx.compose.ui.unit.dp
 import com.example.core.LocalRpgAudioEngine
 import com.example.core.RpgHaptics
 import com.example.core.SfxEvent
+import com.example.data.model.HeroSkills
+import com.example.data.model.InventoryItem
+import com.example.data.model.RiskModifierSummary
 import com.example.data.model.RiskOutcome
 import com.example.data.model.RiskOutcomeTier
 import com.example.data.model.RiskyChoiceResolver
@@ -68,14 +72,23 @@ import kotlinx.coroutines.delay
 fun RiskyOutcomeRouletteSheet(
     choice: TurnChoice,
     activeNpcName: String?,
+    skills: HeroSkills = HeroSkills(),
+    inventoryItems: List<InventoryItem> = emptyList(),
     palette: UniverseVisualPalette,
     haptics: RpgHaptics,
     onDismiss: () -> Unit,
-    onOutcomeResolved: (RiskOutcome) -> Unit
+    onOutcomeResolved: (RiskOutcome, RiskModifierSummary) -> Unit
 ) {
-    val outcomes = remember(choice, activeNpcName) {
-        RiskyChoiceResolver.resolveOutcomes(choice, activeNpcName)
+    val evaluation = remember(choice, activeNpcName, skills, inventoryItems) {
+        RiskyChoiceResolver.resolveOutcomesWithModifiers(
+            choice = choice,
+            activeNpcName = activeNpcName,
+            skills = skills,
+            inventoryItems = inventoryItems
+        )
     }
+    val outcomes = evaluation.outcomes
+    val modifierSummary = evaluation.modifier
     val sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true)
     val audio = LocalRpgAudioEngine.current
 
@@ -197,11 +210,49 @@ fun RiskyOutcomeRouletteSheet(
                 )
             }
 
+            // Active Skill & Equipment Modifier Banner
+            val modifierPositive = modifierSummary.setbackDelta <= 0L
+            val modColor = if (modifierPositive) palette.healthHigh else palette.healthLow
+            Surface(
+                color = modColor.copy(alpha = 0.10f),
+                shape = MaterialTheme.shapes.medium,
+                border = BorderStroke(1.dp, modColor.copy(alpha = 0.35f)),
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .testTag("fate_modifier_banner")
+            ) {
+                Row(
+                    modifier = Modifier.padding(horizontal = 12.dp, vertical = 9.dp),
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.spacedBy(8.dp)
+                ) {
+                    Icon(
+                        imageVector = Icons.Outlined.Shield,
+                        contentDescription = null,
+                        tint = modColor,
+                        modifier = Modifier.size(18.dp)
+                    )
+                    Column(modifier = Modifier.weight(1f)) {
+                        Text(
+                            text = "Бонус навыка и снаряжения",
+                            style = MaterialTheme.typography.labelMedium,
+                            color = modColor,
+                            fontWeight = FontWeight.SemiBold
+                        )
+                        Text(
+                            text = modifierSummary.summaryRu,
+                            style = MaterialTheme.typography.bodySmall,
+                            color = MaterialTheme.colorScheme.onSurface
+                        )
+                    }
+                }
+            }
+
             Text(
                 text = when {
                     isSpinning -> "Судьба крутит колесо — выбирается случайный исход…"
                     winningOutcome != null -> "Выпавший исход зафиксирован:"
-                    else -> "Возможные исходы перед броском — случайный выберется прямо сейчас:"
+                    else -> "Вероятности с учётом ваших характеристик и предметов:"
                 },
                 style = MaterialTheme.typography.labelLarge,
                 color = MaterialTheme.colorScheme.onSurfaceVariant
@@ -358,7 +409,7 @@ fun RiskyOutcomeRouletteSheet(
                     Button(
                         onClick = {
                             audio?.playSfx(SfxEvent.SEND_ACTION)
-                            onOutcomeResolved(resolved)
+                            onOutcomeResolved(resolved, modifierSummary)
                         },
                         colors = ButtonDefaults.buttonColors(
                             containerColor = palette.accentPrimary,

@@ -1,6 +1,8 @@
 package com.example.ui.components
 
 import com.example.data.model.Campaign
+import com.example.data.model.HeroSkills
+import com.example.data.model.InventoryItem
 import com.example.ui.theme.UniverseArchetype
 import com.example.ui.theme.WeatherMood
 import com.example.ui.theme.resolveUniverseArchetype
@@ -9,7 +11,10 @@ data class ParsedHudStats(
     val healthPercent: Int,
     val healthLabel: String,
     val currencyLabel: String,
+    val currencyAmount: Long = 0L,
     val inventoryItems: List<String>,
+    val structuredInventory: List<InventoryItem> = emptyList(),
+    val skills: HeroSkills = HeroSkills(),
     val relationsSummary: String,
     val weatherMood: WeatherMood
 )
@@ -17,9 +22,10 @@ data class ParsedHudStats(
 object HudStatsParser {
     private val percentRegex = Regex("""(\d{1,3})\s*%""")
     private val currencyRegex = Regex(
-        """\b(\d[\d\s]{0,8}(?:крон\p{L}*|эдди|золот\p{L}*|монет\p{L}*|орен\p{L}*|флорин\p{L}*|галлеон\p{L}*|сикл\p{L}*|рю|йен\p{L}*|кредит\p{L}*|доллар\p{L}*))""",
+        """\b(\d[\d\s]{0,8}(?:крон\p{L}*|эдди|золот\p{L}*|монет\p{L}*|орен\p{L}*|флорин\p{L}*|галлеон\p{L}*|сикл\p{L}*|рю|йен\p{L}*|кредит\p{L}*|доллар\p{L}*|евро|рубл\p{L}*))""",
         RegexOption.IGNORE_CASE
     )
+    private val leadingNumberRegex = Regex("""^\d+""")
 
     fun parse(campaign: Campaign): ParsedHudStats {
         val rawStatus = campaign.hudStatusAndInventory.trim()
@@ -27,9 +33,10 @@ object HudStatsParser {
         val rawTime = campaign.hudTime.trim()
         val rawLocation = campaign.hudLocation.trim()
 
-        val (healthPercent, healthLabel) = parseHealth(rawStatus)
-        val currencyLabel = parseCurrency(rawStatus, campaign.inventory)
-        val inventoryItems = parseInventory(rawStatus, campaign.inventory, currencyLabel)
+        val (healthPercent, healthLabel) = parseHealth(rawStatus, campaign.healthPercent)
+        val currencyLabel = resolveCurrency(campaign, rawStatus)
+        val structuredInventory = resolveStructuredInventory(campaign, rawStatus, currencyLabel)
+        val inventoryNames = structuredInventory.map { it.name }
         val relationsSummary = parseRelations(rawRelations)
         val weatherMood = parseWeatherMood(
             universe = campaign.universe,
@@ -41,15 +48,18 @@ object HudStatsParser {
             healthPercent = healthPercent,
             healthLabel = healthLabel,
             currencyLabel = currencyLabel,
-            inventoryItems = inventoryItems,
+            currencyAmount = campaign.currencyAmount.coerceAtLeast(0L),
+            inventoryItems = inventoryNames,
+            structuredInventory = structuredInventory,
+            skills = campaign.skills.coerced(),
             relationsSummary = relationsSummary,
             weatherMood = weatherMood
         )
     }
 
-    private fun parseHealth(rawStatus: String): Pair<Int, String> {
+    private fun parseHealth(rawStatus: String, explicitModelHealth: Long): Pair<Int, String> {
         val statusLower = rawStatus.lowercase()
-        val explicitPercent = percentRegex.find(rawStatus)?.groupValues?.getOrNull(1)?.toIntOrNull()
+        val regexPercent = percentRegex.find(rawStatus)?.groupValues?.getOrNull(1)?.toIntOrNull()
             ?.coerceIn(0, 100)
 
         val rawHealthPart = rawStatus
@@ -61,7 +71,9 @@ object HudStatsParser {
             .trim()
             .trim(',', '.', ';', '-', ' ')
 
-        val inferredPercent = explicitPercent ?: when {
+        val inferredPercent = when {
+            explicitModelHealth in 0L..100L -> explicitModelHealth.toInt()
+            regexPercent != null -> regexPercent
             statusLower.contains("крит") || statusLower.contains("при смерт") ||
                 statusLower.contains("тяжел") || statusLower.contains("истека") -> 25
             statusLower.contains("ранен") || statusLower.contains("ушиб") ||
@@ -86,7 +98,22 @@ object HudStatsParser {
         return inferredPercent to cleanLabel
     }
 
-    private fun parseCurrency(rawStatus: String, inventory: List<String>): String {
+    private fun resolveCurrency(campaign: Campaign, rawStatus: String): String {
+        val explicitLabel = campaign.currencyLabel.trim()
+        if (explicitLabel.isNotBlank()) {
+            return if (campaign.currencyAmount > 0L && !leadingNumberRegex.containsMatchIn(explicitLabel)) {
+                "${campaign.currencyAmount} $explicitLabel"
+            } else {
+                explicitLabel
+            }
+        }
+        if (campaign.currencyAmount > 0L) {
+            return "${campaign.currencyAmount}"
+        }
+        return parseCurrencyRegex(rawStatus, campaign.inventory)
+    }
+
+    private fun parseCurrencyRegex(rawStatus: String, inventory: List<String>): String {
         currencyRegex.find(rawStatus)?.groupValues?.getOrNull(1)?.trim()?.let {
             return it
         }
@@ -98,30 +125,33 @@ object HudStatsParser {
         return ""
     }
 
-    private fun parseInventory(
+    private fun resolveStructuredInventory(
+        campaign: Campaign,
         rawStatus: String,
-        campaignInventory: List<String>,
         currencyLabel: String
-    ): List<String> {
-        val baseItems = if (campaignInventory.isNotEmpty()) {
-            campaignInventory
-        } else {
-            val invSection = Regex("""инвентар[ья]\s*:\s*([^|\]]+)""", RegexOption.IGNORE_CASE)
-                .find(rawStatus)
-                ?.groupValues
-                ?.getOrNull(1)
-                .orEmpty()
-            invSection.split(",")
+    ): List<InventoryItem> {
+        val fromModel = campaign.resolvedInventoryItems()
+            .filterNot { item ->
+                currencyLabel.isNotBlank() && item.name.equals(currencyLabel, ignoreCase = true)
+            }
+        if (fromModel.isNotEmpty()) {
+            return fromModel
         }
 
-        return baseItems
+        val invSection = Regex("""инвентар[ья]\s*:\s*([^|\]]+)""", RegexOption.IGNORE_CASE)
+            .find(rawStatus)
+            ?.groupValues
+            ?.getOrNull(1)
+            .orEmpty()
+
+        return invSection.split(",")
             .map { it.trim() }
             .filter { it.isNotBlank() }
             .filterNot { item ->
                 currencyLabel.isNotBlank() && item.equals(currencyLabel, ignoreCase = true)
             }
-            .map { item -> item.replaceFirstChar { it.uppercase() } }
             .distinctBy { it.lowercase() }
+            .mapIndexed { idx, name -> InventoryItem.fromLegacyName(name, idx) }
     }
 
     private fun parseRelations(rawRelations: String): String {
